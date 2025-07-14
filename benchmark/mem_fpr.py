@@ -265,33 +265,33 @@ if __name__ == "__main__":
 
     lines1, labels1 = axes1[0].get_legend_handles_labels()
 
-    lines2 = lines1[:1] + lines1[2:]
-    labels2 = labels1[:1] + labels1[2:]
+    lines2 = lines1[:2] + lines1[2:]
+    labels2 = labels1[:2] + labels1[2:]
     leg1 = fig1.legend(
         lines2,
         labels2,
         loc="upper center",
         bbox_to_anchor=(0.485, 1.08),
-        ncol=4,
-        fontsize=font_ampl * 20,
+        ncol=5,
+        fontsize=font_ampl * 19,
         frameon=False,
         # more packed 
         handletextpad=0.16,    # <<–– tighter spacing here
         labelspacing=0.1,      # vertical gap
-        columnspacing=0.6,   # <<< add this to reduce horizontal gap
+        columnspacing=0.3,   # <<< add this to reduce horizontal gap
     )
     axes1[0].add_artist(leg1)
-    fig1.legend(
-        [lines1[1]],
-        [labels1[1]],
-        loc="upper center",
-        bbox_to_anchor=(0.318, 0.98),
-        ncol=1,
-        fontsize=font_ampl * 20,
-        frameon=False,
-        handletextpad=0.16,    # <<–– tighter spacing here
-        labelspacing=0.1,      # vertical gap
-    )
+    # fig1.legend(
+    #     [lines1[1]],
+    #     [labels1[1]],
+    #     loc="upper center",
+    #     bbox_to_anchor=(0.318, 0.98),
+    #     ncol=1,
+    #     fontsize=font_ampl * 20,
+    #     frameon=False,
+    #     handletextpad=0.16,    # <<–– tighter spacing here
+    #     labelspacing=0.1,      # vertical gap
+    # )
 
     plt.tight_layout(rect=[0, 0, 1, 0.92])
     plt.subplots_adjust(
