@@ -1,8 +1,11 @@
-# Sphinx: A Succinct Perfect Hash Index for x86
+# Sphinx: A Succinct Perfect Hash Index for x86 
 
-<p align="center">
+<p align="left">
 Sphinx is a state-of-the-art succinct perfect hash table engineered for high performance on modern x86 CPUs. Its innovative encoding leverages rank and select primitives alongside auxiliary metadata to enable near-instantaneous hash table slot decoding. Moreover, Sphinx is designed to be expandable and easily parallelizable.
 </p>
+
+
+VLDB 2025 paper: https://www.vldb.org/pvldb/vol18/p4424-maghrebi.pdf
 
 ## Quickstart
 
