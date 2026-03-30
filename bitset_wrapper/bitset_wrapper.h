@@ -1,15 +1,182 @@
 #pragma once
-#include <x86intrin.h>  // For _pdep_u64 and _tzcnt_u64
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>  // For std::memcmp
+#include <cstdlib>  // For std::abs
 #include <iostream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-constexpr size_t count_bits(size_t n, size_t count = -1) {  // same as log2
+#include "../zp7/zp7.h"
+// true = use zp7_pdep_64, false = use _select64
+static constexpr bool kUseZp7Polyfill = false;
+
+#if (defined(__x86_64__) || defined(__i386__)) && defined(__BMI2__) && (defined(__GNUC__) || defined(__clang__))
+#   include <x86intrin.h> // For _pdep_u64 and _tzcnt_u64
+#else
+#   include <arm_neon.h>
+#endif
+
+#if (defined(__x86_64__) || defined(__i386__)) && defined(__BMI2__) && (defined(__GNUC__) || defined(__clang__))
+    static constexpr bool kHasBmi2 = true;
+#else
+    static constexpr bool kHasBmi2 = false;
+#endif
+
+const uint8_t kSelectInByte[2048] = {
+	8, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0,
+	1, 0, 2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0,
+	2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0,
+	1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0,
+	3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 7, 0,
+	1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0,
+	2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0,
+	1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 6, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0,
+	4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 5, 0, 1, 0, 2, 0, 1, 0, 3, 0,
+	1, 0, 2, 0, 1, 0, 4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 8, 8, 8, 1,
+	8, 2, 2, 1, 8, 3, 3, 1, 3, 2, 2, 1, 8, 4, 4, 1, 4, 2, 2, 1, 4, 3, 3, 1, 3, 2,
+	2, 1, 8, 5, 5, 1, 5, 2, 2, 1, 5, 3, 3, 1, 3, 2, 2, 1, 5, 4, 4, 1, 4, 2, 2, 1,
+	4, 3, 3, 1, 3, 2, 2, 1, 8, 6, 6, 1, 6, 2, 2, 1, 6, 3, 3, 1, 3, 2, 2, 1, 6, 4,
+	4, 1, 4, 2, 2, 1, 4, 3, 3, 1, 3, 2, 2, 1, 6, 5, 5, 1, 5, 2, 2, 1, 5, 3, 3, 1,
+	3, 2, 2, 1, 5, 4, 4, 1, 4, 2, 2, 1, 4, 3, 3, 1, 3, 2, 2, 1, 8, 7, 7, 1, 7, 2,
+	2, 1, 7, 3, 3, 1, 3, 2, 2, 1, 7, 4, 4, 1, 4, 2, 2, 1, 4, 3, 3, 1, 3, 2, 2, 1,
+	7, 5, 5, 1, 5, 2, 2, 1, 5, 3, 3, 1, 3, 2, 2, 1, 5, 4, 4, 1, 4, 2, 2, 1, 4, 3,
+	3, 1, 3, 2, 2, 1, 7, 6, 6, 1, 6, 2, 2, 1, 6, 3, 3, 1, 3, 2, 2, 1, 6, 4, 4, 1,
+	4, 2, 2, 1, 4, 3, 3, 1, 3, 2, 2, 1, 6, 5, 5, 1, 5, 2, 2, 1, 5, 3, 3, 1, 3, 2,
+	2, 1, 5, 4, 4, 1, 4, 2, 2, 1, 4, 3, 3, 1, 3, 2, 2, 1, 8, 8, 8, 8, 8, 8, 8, 2,
+	8, 8, 8, 3, 8, 3, 3, 2, 8, 8, 8, 4, 8, 4, 4, 2, 8, 4, 4, 3, 4, 3, 3, 2, 8, 8,
+	8, 5, 8, 5, 5, 2, 8, 5, 5, 3, 5, 3, 3, 2, 8, 5, 5, 4, 5, 4, 4, 2, 5, 4, 4, 3,
+	4, 3, 3, 2, 8, 8, 8, 6, 8, 6, 6, 2, 8, 6, 6, 3, 6, 3, 3, 2, 8, 6, 6, 4, 6, 4,
+	4, 2, 6, 4, 4, 3, 4, 3, 3, 2, 8, 6, 6, 5, 6, 5, 5, 2, 6, 5, 5, 3, 5, 3, 3, 2,
+	6, 5, 5, 4, 5, 4, 4, 2, 5, 4, 4, 3, 4, 3, 3, 2, 8, 8, 8, 7, 8, 7, 7, 2, 8, 7,
+	7, 3, 7, 3, 3, 2, 8, 7, 7, 4, 7, 4, 4, 2, 7, 4, 4, 3, 4, 3, 3, 2, 8, 7, 7, 5,
+	7, 5, 5, 2, 7, 5, 5, 3, 5, 3, 3, 2, 7, 5, 5, 4, 5, 4, 4, 2, 5, 4, 4, 3, 4, 3,
+	3, 2, 8, 7, 7, 6, 7, 6, 6, 2, 7, 6, 6, 3, 6, 3, 3, 2, 7, 6, 6, 4, 6, 4, 4, 2,
+	6, 4, 4, 3, 4, 3, 3, 2, 7, 6, 6, 5, 6, 5, 5, 2, 6, 5, 5, 3, 5, 3, 3, 2, 6, 5,
+	5, 4, 5, 4, 4, 2, 5, 4, 4, 3, 4, 3, 3, 2, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 3, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 4, 8, 4, 4, 3, 8, 8, 8, 8, 8, 8,
+	8, 5, 8, 8, 8, 5, 8, 5, 5, 3, 8, 8, 8, 5, 8, 5, 5, 4, 8, 5, 5, 4, 5, 4, 4, 3,
+	8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 6, 8, 6, 6, 3, 8, 8, 8, 6, 8, 6, 6, 4, 8, 6,
+	6, 4, 6, 4, 4, 3, 8, 8, 8, 6, 8, 6, 6, 5, 8, 6, 6, 5, 6, 5, 5, 3, 8, 6, 6, 5,
+	6, 5, 5, 4, 6, 5, 5, 4, 5, 4, 4, 3, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 7, 8, 7,
+	7, 3, 8, 8, 8, 7, 8, 7, 7, 4, 8, 7, 7, 4, 7, 4, 4, 3, 8, 8, 8, 7, 8, 7, 7, 5,
+	8, 7, 7, 5, 7, 5, 5, 3, 8, 7, 7, 5, 7, 5, 5, 4, 7, 5, 5, 4, 5, 4, 4, 3, 8, 8,
+	8, 7, 8, 7, 7, 6, 8, 7, 7, 6, 7, 6, 6, 3, 8, 7, 7, 6, 7, 6, 6, 4, 7, 6, 6, 4,
+	6, 4, 4, 3, 8, 7, 7, 6, 7, 6, 6, 5, 7, 6, 6, 5, 6, 5, 5, 3, 7, 6, 6, 5, 6, 5,
+	5, 4, 6, 5, 5, 4, 5, 4, 4, 3, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 5, 8, 8, 8, 8, 8, 8, 8, 5, 8, 8, 8, 5, 8, 5, 5, 4, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 6, 8, 6,
+	6, 4, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 6, 8, 6, 6, 5, 8, 8, 8, 6, 8, 6, 6, 5,
+	8, 6, 6, 5, 6, 5, 5, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8,
+	8, 8, 8, 8, 8, 7, 8, 8, 8, 7, 8, 7, 7, 4, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 7,
+	8, 7, 7, 5, 8, 8, 8, 7, 8, 7, 7, 5, 8, 7, 7, 5, 7, 5, 5, 4, 8, 8, 8, 8, 8, 8,
+	8, 7, 8, 8, 8, 7, 8, 7, 7, 6, 8, 8, 8, 7, 8, 7, 7, 6, 8, 7, 7, 6, 7, 6, 6, 4,
+	8, 8, 8, 7, 8, 7, 7, 6, 8, 7, 7, 6, 7, 6, 6, 5, 8, 7, 7, 6, 7, 6, 6, 5, 7, 6,
+	6, 5, 6, 5, 5, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 5, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 8, 8, 8, 8, 6, 8, 8, 8, 6,
+	8, 6, 6, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7,
+	8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 7, 8, 7, 7, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 7, 8, 7, 7, 6, 8, 8, 8, 8,
+	8, 8, 8, 7, 8, 8, 8, 7, 8, 7, 7, 6, 8, 8, 8, 7, 8, 7, 7, 6, 8, 7, 7, 6, 7, 6,
+	6, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 6,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 8, 8, 8, 8, 7, 8, 8, 8, 7, 8, 7, 7, 6, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+	8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7
+};
+
+/**
+ * Returns the position of the `k`-th 1 in the 64-bit word x. `k` is 0-based,
+ * so `k`=0 returns the position of the first 1.
+ *
+ * Uses the broadword selection algorithm by Vigna [1], improved by Gog and
+ * Petri [2] and Vigna [3].
+ *
+ * [1] Sebastiano Vigna. Broadword Implementation of Rank/Select Queries. WEA,
+ * 2008
+ *
+ * [2] Simon Gog, Matthias Petri. Optimized succinct data structures for
+ * massive data. Softw. Pract. Exper., 2014
+ *
+ * [3] Sebastiano Vigna. MG4J 5.2.1. http://mg4j.di.unimi.it/
+ * The following code is taken from
+ * https://github.com/facebook/folly/blob/b28186247104f8b90cfbe094d289c91f9e413317/folly/experimental/Select64.h
+ *
+ * @param x - The mask to select from.
+ * @param k - The desired bit rank.
+ * @returns The position of the `k`-th set bit.
+ */
+static inline uint64_t _select64(uint64_t x, int k)
+{
+	if (k >= __builtin_popcountll(x)) { return 64; }
+
+	const uint64_t kOnesStep4  = 0x1111111111111111ULL;
+	const uint64_t kOnesStep8  = 0x0101010101010101ULL;
+	const uint64_t kMSBsStep8  = 0x80ULL * kOnesStep8;
+
+	uint64_t s = x;
+	s = s - ((s & 0xA * kOnesStep4) >> 1);
+	s = (s & 0x3 * kOnesStep4) + ((s >> 2) & 0x3 * kOnesStep4);
+	s = (s + (s >> 4)) & 0xF * kOnesStep8;
+	uint64_t byteSums = s * kOnesStep8;
+
+	uint64_t kStep8 = k * kOnesStep8;
+	uint64_t geqKStep8 = (((kStep8 | kMSBsStep8) - byteSums) & kMSBsStep8);
+	uint64_t place = __builtin_popcountll(geqKStep8) * 8;
+	uint64_t byteRank = k - (((byteSums << 8) >> place) & (uint64_t)(0xFF));
+	return place + kSelectInByte[((x >> place) & 0xFF) | (byteRank << 8)];
+}
+
+constexpr uint64_t L8 = 0x0101010101010101ULL; // Lowest bit of each byte
+constexpr uint64_t H8 = 0x8080808080808080ULL; // Highest bit of each byte
+
+/**
+ * @brief Parallel unsigned <= (byte-wise).
+ * High bit in each byte is set if x_i <= y_i (unsigned).
+ */
+inline constexpr uint64_t u_le8(uint64_t x, uint64_t y) {
+    return ((((y | H8) - (x & ~H8)) | (x ^ y)) ^ (x & ~y)) & H8;
+}
+
+/**
+ * @brief Parallel signed <= (byte-wise).
+ * High bit in each byte is set if x_i <= y_i (signed).
+ */
+inline constexpr uint64_t i_le8(uint64_t x, uint64_t y) {
+    return (((y | H8) - (x & ~H8)) ^ x ^ y) & H8;
+}
+
+/**
+ * @brief Parallel > 0 (byte-wise).
+ * High bit in each byte is set if x_i > 0.
+ */
+inline constexpr uint64_t u_nz8(uint64_t x) {
+    return (((x | H8) - L8) | x) & H8;
+}
+
+constexpr size_t count_bits(size_t n, size_t count = static_cast<size_t>(-1)) {  // same as log2
     return n ? count_bits(n >> 1, count + 1) : count;
 }
 
@@ -22,8 +189,8 @@ constexpr size_t REGISTER_SIZE_BITS = static_cast<size_t>(count_bits(REGISTER_SI
 
 inline uint64_t GET_ZERO_MSB(const size_t first_zero_index) {
     if (first_zero_index == 64)
-        return ~0;
-    return (1ull << first_zero_index) - 1;
+        return ~0ULL;
+    return (1ULL << first_zero_index) - 1;
 }
 inline uint64_t GET_ONE_MSB(const size_t first_one_index) {
     return ~GET_ZERO_MSB(first_one_index);
@@ -104,7 +271,7 @@ class BitsetWrapper {
 
     void setInputInt64(const int64_t repeating_number) {
         for (size_t j = 0; j < NUM_REGS; j++) {
-            set_fast_one_reg(j, 0, REGISTER_SIZE, repeating_number);
+            set_fast_one_reg(j, 0, REGISTER_SIZE, static_cast<size_t>(repeating_number));
         }
     }
 
@@ -126,10 +293,10 @@ class BitsetWrapper {
 
     // need to be tested
     [[nodiscard]] inline size_t __attribute__((always_inline)) get_second_leading_zeros(size_t reg_idx) const {
-        int64_t nVal = ~(1ULL << (REGISTER_SIZE - __builtin_clzll(bitset[reg_idx]) - 1)) & bitset[reg_idx];
+        int64_t nVal = static_cast<int64_t>(~(1ULL << (REGISTER_SIZE - __builtin_clzll(bitset[reg_idx]) - 1)) & bitset[reg_idx]);
         if (nVal == 0)
             return REGISTER_SIZE;
-        return __builtin_clzll(nVal);
+        return __builtin_clzll(static_cast<unsigned long long>(nVal));
     }
 
     inline size_t __attribute__((always_inline)) get_trailing_zeros(size_t reg_idx) {
@@ -141,7 +308,7 @@ class BitsetWrapper {
         if (__builtin_expect(agg_index >= N, 0))
             throw std::invalid_argument("index out of bound 1");
         const size_t idx = GET_INDEX(agg_index), offset = GET_OFFSET(agg_index);
-        return static_cast<bool>(bitset[idx] & 1ULL << offset);
+        return static_cast<bool>(bitset[idx] & (1ULL << offset));
     }
     inline int get_first_one_before_slow(const size_t index, const size_t from = 0) const {
         const size_t agg_index = index + from;
@@ -222,7 +389,7 @@ class BitsetWrapper {
     }
     inline void __attribute__((always_inline)) set_fast_one_reg(const size_t idx, const size_t offset_start, const size_t offset_after_end, const size_t value) {
         // idx2 exclusive
-        size_t range_length = offset_after_end - offset_start;
+        const size_t range_length = offset_after_end - offset_start;
         size_t range_mask = ((1UL << range_length) - 1) << offset_start;
 
         range_mask |= -(range_length == REGISTER_SIZE);
@@ -267,11 +434,10 @@ class BitsetWrapper {
         return count;
     }
 
-    size_t select_dumb(const size_t nth) {
+    size_t select_dumb(const size_t nth) const {
         if (nth == 0) throw std::out_of_range("nth must be greater than 0.");
         size_t count = 0;
-        size_t i;
-        for (i = 0; i < N; ++i) {
+        for (size_t i = 0; i < N; ++i) {
             if (get(i)) ++count;
             if (count == nth) return i;
         }
@@ -285,7 +451,7 @@ class BitsetWrapper {
         for (size_t i = 0; i < index; ++i) {
             count += __builtin_popcountll(bitset[i]);
         }
-        uint64_t mask = (static_cast<uint64_t>(1) << offset) - 1;
+        const uint64_t mask = (offset == 0) ? 0ULL : ((static_cast<uint64_t>(1) << offset) - 1);
         count += __builtin_popcountll(bitset[index] & mask);
         return count;
     }
@@ -300,9 +466,24 @@ class BitsetWrapper {
             block = bitset[i];
             blockPopCount = __builtin_popcountll(block);
         }
-        const uint64_t nthBitMask = static_cast<uint64_t>(1) << (nth - count - 1);  // Create a mask for the nth bit
+
+        // 0-based index of the target bit within the isolated 64-bit block
+        const size_t bitIndexInWord = nth - count - 1; 
+        size_t bitPosition;
+
+    #if kHasBmi2 // --- Fast Path: x86 Hardware BMI2 ---
+        const uint64_t nthBitMask = static_cast<uint64_t>(1) << bitIndexInWord;
         const uint64_t depositMask = _pdep_u64(nthBitMask, block);
-        const size_t bitPosition = _tzcnt_u64(depositMask);  // Count trailing zeros to find the position
+        bitPosition = _tzcnt_u64(depositMask);
+    #else // --- Software Fallbacks (ARM / Non-BMI2 x86) ---
+        if constexpr (kUseZp7Polyfill) {
+            const uint64_t nthBitMask = static_cast<uint64_t>(1) << bitIndexInWord;
+            const uint64_t depositMask = zp7_pdep_64(nthBitMask, block);
+            bitPosition = __builtin_ctzll(depositMask); 
+        } else {
+            bitPosition = _select64(block, bitIndexInWord);
+        }
+    #endif
         return ((i - start_from_reg - 1) * REGISTER_SIZE) + bitPosition;
     }
 
@@ -323,11 +504,35 @@ class BitsetWrapper {
             break;
         }
 
-        const uint64_t nth_fromth = static_cast<uint64_t>(1 + (1 << (toth - fromth))) << (fromth - count - 1);
+        // Upgraded to 1ULL to prevent 32-bit signed overflow on large shifts
+        const uint64_t nth_fromth = (1ULL + (1ULL << (toth - fromth))) << (fromth - count - 1);
+        
+        size_t bit_pos_fromth;
+        size_t bit_pos_toth_lz;
+
+    #if kHasBmi2 // --- Fast Path: x86 Hardware BMI2 ---
         const uint64_t deposit_fromth = _pdep_u64(nth_fromth, block);
-        const size_t bit_pos_fromth = _tzcnt_u64(deposit_fromth);
-        size_t bit_pos_toth = _lzcnt_u64(deposit_fromth);
-        size_t diff = REGISTER_SIZE - 1 - bit_pos_toth - bit_pos_fromth;
+        bit_pos_fromth = _tzcnt_u64(deposit_fromth);
+        bit_pos_toth_lz = _lzcnt_u64(deposit_fromth);
+    #else // --- Software Fallbacks ---
+        if constexpr (kUseZp7Polyfill) {
+            const uint64_t deposit_fromth = zp7_pdep_64(nth_fromth, block);
+            bit_pos_fromth = __builtin_ctzll(deposit_fromth);
+            bit_pos_toth_lz = __builtin_clzll(deposit_fromth);
+        } else {
+            bit_pos_fromth = _select64(block, fromth - count - 1);
+            
+            // To maintain the `diff == 0` spill-over check, we need to simulate _lzcnt.
+            // If the `toth` bit is out of bounds for this block, _select64 returns 64.
+            size_t actual_toth_pos = _select64(block, toth - count - 1);
+            if (actual_toth_pos == 64) {
+                bit_pos_toth_lz = REGISTER_SIZE - 1 - bit_pos_fromth; // forces diff to 0
+            } else {
+                bit_pos_toth_lz = REGISTER_SIZE - 1 - actual_toth_pos;
+            }
+        }
+    #endif
+        size_t diff = REGISTER_SIZE - 1 - bit_pos_toth_lz - bit_pos_fromth;
         size_t fromth_return = ((i1 - start_from_reg) << REGISTER_SIZE_BITS) + bit_pos_fromth;
         size_t toth_return = fromth_return + diff;
 
@@ -335,16 +540,28 @@ class BitsetWrapper {
             count += block_pop_count;
             block = bitset[++i1];
             block_pop_count = __builtin_popcountll(block);
-            const uint64_t nth_toth = static_cast<uint64_t>(1) << (toth - count - 1);
+            
+            const uint64_t nth_toth = 1ULL << (toth - count - 1);
+            size_t bit_pos_toth;
+
+        #if kHasBmi2
             const uint64_t deposit_toth = _pdep_u64(nth_toth, block);
             bit_pos_toth = _tzcnt_u64(deposit_toth);
+        #else
+            if constexpr (kUseZp7Polyfill) {
+                const uint64_t deposit_toth = zp7_pdep_64(nth_toth, block);
+                bit_pos_toth = __builtin_ctzll(deposit_toth);
+            } else {
+                bit_pos_toth = _select64(block, toth - count - 1);
+            }
+        #endif
             toth_return = ((i1 - start_from_reg) << REGISTER_SIZE_BITS) + bit_pos_toth;
         }
 
         return std::make_pair(fromth_return, toth_return);
     }
 
-    inline std::pair<size_t, size_t> select2(const size_t nth, const size_t start_from_reg = 0) {
+    inline std::pair<size_t, size_t> select2(const size_t nth, const size_t start_from_reg = 0) const {
         if (__builtin_expect(nth == 0, 0))
             throw std::out_of_range("nth must be greater than 0.");
 
@@ -359,9 +576,26 @@ class BitsetWrapper {
             }
 
             const uint64_t nthBitMask = static_cast<uint64_t>(3) << (nth - count - 1);  // Create a mask for the nth bit
+            
+            size_t bitPosition;
+            size_t bitPosition_left;
+
+        #if kHasBmi2
             const uint64_t depositMask = _pdep_u64(nthBitMask, block);
-            const size_t bitPosition = _tzcnt_u64(depositMask);       // Count trailing zeros to find the position
-            const size_t bitPosition_left = _lzcnt_u64(depositMask);  // Count trailing zeros to find the position
+            bitPosition = _tzcnt_u64(depositMask);
+            bitPosition_left = _lzcnt_u64(depositMask);
+        #else
+            if constexpr (kUseZp7Polyfill) {
+                const uint64_t depositMask = zp7_pdep_64(nthBitMask, block);
+                bitPosition = __builtin_ctzll(depositMask);
+                bitPosition_left = __builtin_clzll(depositMask); 
+            } else {
+                // Fallback using _select64 twice if no PDEP is available at all
+                bitPosition = _select64(block, nth - count - 1);
+                bitPosition_left = _select64(block, nth - count);
+            }
+        #endif
+
             size_t diff = REGISTER_SIZE - 1 - bitPosition_left - bitPosition;
             return std::make_pair(((i - start_from_reg) << REGISTER_SIZE_BITS) + bitPosition,
                                   ((i - start_from_reg) << REGISTER_SIZE_BITS) + bitPosition + diff);
@@ -382,10 +616,10 @@ class BitsetWrapper {
         }
     }
 
-    inline void deprecated_shift(int64_t steps, int64_t from, int64_t to = size()) {
+    inline void deprecated_shift(int64_t steps, int64_t from, int64_t to = static_cast<int64_t>(size())) {
         // to exclusive / from inclusive
     #ifdef DEBUG
-        if (!(to >= from && to <= size())) {
+        if (!(to >= from && to <= static_cast<int64_t>(size()))) {
             throw std::invalid_argument("Invalid to/from range");
         }
     #endif
@@ -394,27 +628,27 @@ class BitsetWrapper {
         if (steps > 0) {
             // Right shift
             for (auto i = to - 1; i >= from + steps; --i) {
-                set(i, get(i - steps));
+                set(static_cast<size_t>(i), get(static_cast<size_t>(i - steps)));
             }
             // Clear the bits that have been shifted out
             for (auto i = from; i < from + std::min(steps, to - from); ++i) {
-                set(i, false);
+                set(static_cast<size_t>(i), false);
             }
         } else {
             // Left shift
-            int64_t abs_steps = -steps;
+            const int64_t abs_steps = -steps;
             for (auto i = from; i < to - abs_steps; ++i) {
-                set(i, get(i + abs_steps));
+                set(static_cast<size_t>(i), get(static_cast<size_t>(i + abs_steps)));
             }
             for (auto i = to - std::min(abs_steps, to - from); i < to; ++i) {
-                set(i, false);
+                set(static_cast<size_t>(i), false);
             }
         }
     }
 // some ideas
 // remove steps sign so remove one branch
     inline void shift_smart(int steps, size_t from, size_t to = size()) {
-        const size_t bitShift = std::abs(steps);
+        const size_t bitShift = static_cast<size_t>(std::abs(steps));
     #ifdef DEBUG
         if (!(to >= from && to <= size())) {
             throw std::invalid_argument("Invalid to/from range");
@@ -434,18 +668,18 @@ class BitsetWrapper {
         const uint64_t zeroOnMSBStart = GET_ZERO_MSB(startOffset);
         const uint64_t to2end = bitset[endIdx] & oneOnMSBEnd;
         const uint64_t start2from = bitset[startIdx] & zeroOnMSBStart;
-    
+
         if (steps > 0) {
             // Mask and compute spill over for startIdx
             const uint64_t startMask = ~zeroOnMSBStart;
             uint64_t maskedStart = bitset[startIdx] & startMask;
-    
+
             // Shift elements from end to start
-            for (int64_t i = endIdx; i > static_cast<int64_t>(startIdx); --i) {
-                uint64_t prev = (i == startIdx + 1) ? maskedStart : bitset[i - 1];
+            for (int64_t i = static_cast<int64_t>(endIdx); i > static_cast<int64_t>(startIdx); --i) {
+                const uint64_t prev = (i == static_cast<int64_t>(startIdx) + 1) ? maskedStart : bitset[i - 1];
                 bitset[i] = (bitset[i] << bitShift) | (prev >> (REGISTER_SIZE - bitShift));
             }
-    
+
             // Apply shifts to startIdx and restore preserved bits
             bitset[startIdx] = (maskedStart << bitShift) | start2from;
             bitset[endIdx] = (bitset[endIdx] & ~oneOnMSBEnd) | to2end;
@@ -455,8 +689,8 @@ class BitsetWrapper {
             uint64_t maskedEnd = bitset[endIdx] & endMask;
     
             // Shift elements from start to end
-            for (int64_t i = startIdx; i < static_cast<int64_t>(endIdx); ++i) {
-                uint64_t next = (i == endIdx - 1) ? maskedEnd : bitset[i + 1];
+            for (int64_t i = static_cast<int64_t>(startIdx); i < static_cast<int64_t>(endIdx); ++i) {
+                const uint64_t next = (i == static_cast<int64_t>(endIdx) - 1) ? maskedEnd : bitset[i + 1];
                 bitset[i] = (bitset[i] >> bitShift) | (next << (REGISTER_SIZE - bitShift));
             }
     

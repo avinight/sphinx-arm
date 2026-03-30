@@ -1,9 +1,14 @@
 #pragma once
 #include <cstddef>  // for size_t
+#if defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#endif
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <limits>
+#include <type_traits>
 
 #include "../BST/BST.h"
 #include "../SSDLog/SSDLog.h"
@@ -12,6 +17,7 @@
 #include "../hashing/hashing.h"
 #include "../hashtable/hashtable.h"
 #include "../payload/payload.h"
+#include "../zp7/zp7.h"
 
 #ifdef ENABLE_XDP
 template <
@@ -57,6 +63,31 @@ struct RemoveReturnInfo {
     RemoveReturnStatus rs{RemoveReturnStatusSuccessful};
     std::unique_ptr<BlockInfo> blockInfo{nullptr};
 };
+
+// Naive bit compression and expansion functions for arbitrary unsigned integer types
+template <typename T>
+constexpr T bit_compress(T x, T m) noexcept 
+{
+    T result = 0;
+    for (int i = 0, j = 0; i < std::numeric_limits<T>::digits; ++i) {
+        bool mask_bit = (m >> i) & 1;
+        result |= (mask_bit & (x >> i)) << j;
+        j += mask_bit;
+    }
+    return result;
+}
+
+template<unsigned_integral T>
+constexpr T bit_expand(T x, T m) noexcept
+{
+    T result = 0;
+    for (int i = 0, j = 0; i < numeric_limits<T>::digits; ++i) {
+        bool mask_bit = (m >> i) & 1;
+        result |= (mask_bit & (x >> j)) << i;
+        j += mask_bit;
+    }
+    return result;
+}
 
 template <typename Traits = DefaultTraits>
 class Block {
@@ -205,8 +236,8 @@ class Block {
 
             const auto node = ht1.table[hash_val];
             if (static_cast<std::uint64_t>(node.key) == signature) {
-//                const auto important_bits = static_cast<uint64_t>(_pext_u64(fingerprint.bitset[0], node.value << FP_index));
-                const auto important_bits = static_cast<uint64_t>(_pext_u64(fingerprint.bitset[0], static_cast<uint64_t>(node.value) << FP_index));
+//                const auto important_bits = static_cast<uint64_t>(zp7_pext_64(fingerprint.bitset[0], node.value << FP_index));
+                const auto important_bits = static_cast<uint64_t>(zp7_pext_64(fingerprint.bitset[0], static_cast<uint64_t>(node.value) << FP_index));
                 const auto low_bit = important_bits * 3;
                 ret = (node.indices >> low_bit) & (0b111);
             } else {
@@ -412,7 +443,7 @@ class Block {
         const auto hash_val = ht1.hash_function(static_cast<uint16_t>(signature));
         const auto node = ht1.table[hash_val];
         if (static_cast<std::uint64_t>(node.key) == signature) {
-            const auto important_bits = static_cast<uint64_t>(_pext_u64(fingerprint.bitset[0], static_cast<uint64_t>(node.value) << FP_index));
+            const auto important_bits = static_cast<uint64_t>(zp7_pext_64(fingerprint.bitset[0], static_cast<uint64_t>(node.value) << FP_index));
             const auto low_bit = important_bits * 3;
             matched_offset = (node.indices >> low_bit) & (0b111);
         } else {
