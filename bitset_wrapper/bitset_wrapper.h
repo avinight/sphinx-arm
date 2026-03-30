@@ -176,6 +176,27 @@ inline constexpr uint64_t u_nz8(uint64_t x) {
     return (((x | H8) - L8) | x) & H8;
 }
 
+static inline uint64_t _select_64(uint64_t x, int k) {
+    // Broadword SWAR Fallback (Vigna's Algorithm)
+    uint64_t s = word - ((word & 0xAAAAAAAAAAAAAAAAULL) >> 1);
+    s = (s & 0x3333333333333333ULL) + ((s >> 2) & 0x3333333333333333ULL);
+    s = ((s + (s >> 4)) & 0x0F0F0F0F0F0F0F0FULL) * L8;
+
+    const uint64_t r = static_cast<uint64_t>(zero_based_rank);
+    
+    // Locate target byte
+    uint64_t b = ((i_le8(s, r * L8) >> 7) * L8 >> 53) & ~7ULL;
+    
+    // Rank inside target byte
+    const uint64_t l = r - (((s << 8) >> b) & 0xFFULL);
+    
+    // Isolate byte and compute cumulative sums
+    s = (u_nz8((((word >> b) & 0xFFULL) * L8) & 0x8040201008040201ULL) >> 7) * L8;
+    
+    // Final bit index
+    return static_cast<size_t>(b + (((i_le8(s, l * L8)) >> 7) * L8 >> 56));
+}
+
 constexpr size_t count_bits(size_t n, size_t count = static_cast<size_t>(-1)) {  // same as log2
     return n ? count_bits(n >> 1, count + 1) : count;
 }
