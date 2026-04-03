@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 project(zipfian_generator)
-add_library(zipfian_generator STATIC zipfian_generator.h)
+add_library(zipfian_generator INTERFACE)
 set_target_properties(zipfian_generator PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(zipfian_generator PUBLIC project_compiler_flags)
+target_link_libraries(zipfian_generator INTERFACE project_compiler_flags)
 target_include_directories(zipfian_generator INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

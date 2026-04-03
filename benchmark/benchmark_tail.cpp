@@ -140,7 +140,7 @@ int main() {
     std::filesystem::create_directories(dataFolder);
 
     std::vector<std::string> ssdLogPaths = {
-        "/data/fleck/directory_test.txt", // SSD path
+        HOME + "/research/sphinx/benchmark/directory_test.txt", // SSD path
         // "/optane/log/directory_tests.txt"   // Optane path
     };
 
@@ -201,7 +201,8 @@ int main() {
 
             // Measure median query times for Fleck.
             auto medianTimesFleck = runQueryTest(queryKeys, NUM_ROUNDS, [&](size_t key) {
-                fleckDir.readSegmentSingleThread(key, ssdLogFleck);
+                auto read_res = fleckDir.readSegmentSingleThread(key, ssdLogFleck);
+                (void)read_res;
             });
             std::sort(medianTimesFleck.begin(), medianTimesFleck.end());
             std::ofstream outFleck(dataFolder + "/fleck_query_times_" + suffix + ".csv");
@@ -213,4 +214,3 @@ int main() {
 
     return 0;
 }
-

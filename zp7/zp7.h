@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#pragma once
 #include <stdint.h>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -129,6 +130,7 @@ uint64_t popcnt_64(uint64_t x) {
     return (x * 0x0101010101010101LLU) >> 56;
 }
 #endif
+#endif
 
 // Parallel-prefix-popcount. This is used by both the PEXT/PDEP polyfills.
 // It can also be called separately and cached, if the mask values will be used
@@ -158,7 +160,7 @@ zp7_masks_64_t zp7_ppp_64(uint64_t mask) {
     }
     r.ppp_bit[N_BITS - 1] = -m << 1;
 
-#ifdef defined(HAS_CLMUL)
+#elif defined(HAS_CLMUL)
     // Move the mask and -2 to XMM registers for CLMUL
     __m128i m = _mm_cvtsi64_si128(mask);
     __m128i neg_2 = _mm_cvtsi64_si128(-2LL);

@@ -330,6 +330,7 @@ void Run(Directory<Traits>& dir, SSDLog<Traits>& ssdLog, size_t total_writes, co
             for (auto key : random_keys) {
                 auto start_read = std::chrono::high_resolution_clock::now();
                 auto res = dir.readSegmentSingleThread(key, ssdLog);
+                (void)res;
                 auto end_read = std::chrono::high_resolution_clock::now();
                 long long latency = std::chrono::duration_cast<std::chrono::nanoseconds>(end_read - start_read).count();
                 latency_values.push_back(latency);
@@ -346,6 +347,7 @@ void Run(Directory<Traits>& dir, SSDLog<Traits>& ssdLog, size_t total_writes, co
             for (auto key : non_existent_keys) {
                 auto start_read = std::chrono::high_resolution_clock::now();
                 auto res = dir.readSegmentSingleThread(key, ssdLog);
+                (void)res;
                 auto end_read = std::chrono::high_resolution_clock::now();
                 long long latency = std::chrono::duration_cast<std::chrono::nanoseconds>(end_read - start_read).count();
                 latency_values.push_back(latency);
@@ -362,6 +364,7 @@ void Run(Directory<Traits>& dir, SSDLog<Traits>& ssdLog, size_t total_writes, co
             for (auto key : nonexistent_keys) {
                 auto start_read = std::chrono::high_resolution_clock::now();
                 auto res = dir.readSegmentSingleThread(key, ssdLog);
+                (void)res;
                 auto end_read = std::chrono::high_resolution_clock::now();
                 long long latency = std::chrono::duration_cast<std::chrono::nanoseconds>(end_read - start_read).count();
                 total_nonexistent_read_latency += latency;
@@ -433,7 +436,7 @@ void performTestFilterInfini(const std::string& ssdLogPath, const std::string& f
 int main() {
     // Define a vector of configurations (folder for output and SSD log file path)
     std::vector<std::pair<std::string, std::string>> configs = {
-        {HOME + "/research/sphinx/benchmark/data-extra-bits", "/data/fleck/directory_test_3.txt"},
+        {HOME + "/research/sphinx/benchmark/data-extra-bits", HOME + "/research/sphinx/benchmark/logs/directory_test_3.txt"},
     };
 
     // Iterate over each configuration folder
@@ -443,6 +446,7 @@ int main() {
 
         // Create the directory (and any necessary parent directories)
         std::filesystem::create_directories(dataFolder);
+        std::filesystem::create_directories(std::filesystem::path(ssdLogPath).parent_path());
 
         // #ifdef IN_MEMORY_FILE
         // throw std::invalid_argument("This benchmark is not compatible with IN_MEMORY_FILE");

@@ -35,7 +35,7 @@ constexpr size_t INIT_SIZE = 1ull << INIT_SIZE_LOG;
 constexpr size_t NUM_KEYS_TOTAL =
     static_cast<size_t>(0.91 * INIT_SIZE * (1 << RSQF_STATIC_FP_SIZE));
 constexpr auto SIZE_KEY_INFINI_LOG = MAX_INFINI_EXP + INIT_SIZE_LOG;
-constexpr size_t TAIL_LATENCY_CNT = 1000;
+[[maybe_unused]] constexpr size_t TAIL_LATENCY_CNT = 1000;
 std::mt19937 gen(12345); // Mersenne Twister random number generator
 ycsbc::ZipfianGenerator zipfian_gen(1, NUM_KEYS_TOTAL);
 
@@ -279,7 +279,7 @@ void insert_pht(memento::Memento<true> &filter,
     for (auto &r : res) {
         DefaultTraits::ENTRY_TYPE entry_type;
         ssdLog.read(r, entry_type);
-        if (entry_type.key != key) {
+        if (entry_type.key != static_cast<decltype(entry_type.key)>(key)) {
             stash_dict[key] = pt;
             stashed = true;
             break;
@@ -297,7 +297,7 @@ void query_pht(memento::Memento<true> &filter,
     if (it != stash_dict.end()) {
         DefaultTraits::ENTRY_TYPE entry_type;
         ssdLog.read(it->second, entry_type);
-        if (entry_type.key != vv) {
+        if (entry_type.key != static_cast<decltype(entry_type.key)>(vv)) {
             readFilter<Traits>(filter, ssdLog, vv);
         }
     } else {
@@ -362,7 +362,8 @@ void Run(Directory<Traits> &dir, SSDLog<Traits> &ssdLog, size_t numKeys,
                 auto vv = v[j];
                 auto is_update = upd_or_read[j];
                 if (!is_update) {
-                    dir.readSegmentSingleThread(vv, ssdLog);
+                    auto read_res = dir.readSegmentSingleThread(vv, ssdLog);
+                    (void)read_res;
                 } else {
                     auto new_value = updated_v[j];
                     auto pt_update = ssdLog.write(vv, new_value);

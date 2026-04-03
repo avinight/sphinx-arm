@@ -84,11 +84,30 @@ class SSDLog {
         if constexpr (Traits::IN_MEMORY) {
             inMemoryFile.resize(logSize * PAGE_SIZE);
         } else {
-            fd = open(filename.c_str(), O_DIRECT | O_RDWR | O_CREAT | O_TRUNC, 0644); // with direct io to bypass cache
+
+#if defined(__linux__)
+            fd = open(filename.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_DIRECT, 0644);
             if (fd == -1) {
                 throw std::runtime_error("Failed to open file with O_DIRECT flag");
             }
             posix_fallocate(fd, 0, logSize * PAGE_SIZE);
+#elif defined(__APPLE__)
+            fd = open(filename.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+            if (fd == -1) {
+                throw std::runtime_error("Failed to open file with O_DIRECT flag");
+            }
+
+        // bypass cache on macOS
+        if (fcntl(fd, F_NOCACHE, 1) == -1) {
+            throw std::runtime_error("Failed to set F_NOCACHE on macOS");
+        }
+        fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, (off_t)(logSize * PAGE_SIZE), 0};
+        if (fcntl(fd, F_PREALLOCATE, &store) == -1) {
+            store.fst_flags = F_ALLOCATEALL;
+            fcntl(fd, F_PREALLOCATE, &store);
+        }
+        ftruncate(fd, logSize * PAGE_SIZE);
+#endif
         }
     }
 
@@ -174,7 +193,7 @@ class SSDLog {
                 } else {
                     const off_t offset = pageIndex * PAGE_SIZE;
                     ssize_t result = pread(fd, aligned_buffer, PAGE_SIZE, offset);
-                    if (result != PAGE_SIZE) {
+                    if (result != static_cast<ssize_t>(PAGE_SIZE)) {
                         std::cerr << "Failed to read from disk, expected " << PAGE_SIZE << ", got " << result
                                   << ". errno: " << strerror(errno) << '\n';
                         throw std::runtime_error("Failed to read from disk");
@@ -252,7 +271,8 @@ class SSDLog {
             if constexpr (Traits::IN_MEMORY) {
                 std::memcpy(buffer, &inMemoryFile[offset], PAGE_SIZE);
             } else {
-                if (pread(fd, buffer, PAGE_SIZE, offset) != PAGE_SIZE) {
+                ssize_t bytes_read = pread(fd, buffer, PAGE_SIZE, offset);
+                if (bytes_read != static_cast<ssize_t>(PAGE_SIZE)) {
                     free(buffer);
                     throw std::runtime_error("Failed to read from disk");
                 }

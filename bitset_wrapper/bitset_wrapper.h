@@ -13,9 +13,9 @@
 // true = use zp7_pdep_64, false = use _select64
 static constexpr bool kUseZp7Polyfill = false;
 
-#if (defined(__x86_64__) || defined(__i386__)) && defined(__BMI2__) && (defined(__GNUC__) || defined(__clang__))
-#   include <x86intrin.h> // For _pdep_u64 and _tzcnt_u64
-#else
+#if defined(__x86_64__) || defined(__i386__)
+#   include <immintrin.h>
+#elif defined(__aarch64__) || defined(__arm__)
 #   include <arm_neon.h>
 #endif
 
@@ -178,11 +178,11 @@ inline constexpr uint64_t u_nz8(uint64_t x) {
 
 static inline uint64_t _select_64(uint64_t x, int k) {
     // Broadword SWAR Fallback (Vigna's Algorithm)
-    uint64_t s = word - ((word & 0xAAAAAAAAAAAAAAAAULL) >> 1);
+    uint64_t s = x - ((x & 0xAAAAAAAAAAAAAAAAULL) >> 1);
     s = (s & 0x3333333333333333ULL) + ((s >> 2) & 0x3333333333333333ULL);
     s = ((s + (s >> 4)) & 0x0F0F0F0F0F0F0F0FULL) * L8;
 
-    const uint64_t r = static_cast<uint64_t>(zero_based_rank);
+    const uint64_t r = static_cast<uint64_t>(k);
     
     // Locate target byte
     uint64_t b = ((i_le8(s, r * L8) >> 7) * L8 >> 53) & ~7ULL;
@@ -191,7 +191,7 @@ static inline uint64_t _select_64(uint64_t x, int k) {
     const uint64_t l = r - (((s << 8) >> b) & 0xFFULL);
     
     // Isolate byte and compute cumulative sums
-    s = (u_nz8((((word >> b) & 0xFFULL) * L8) & 0x8040201008040201ULL) >> 7) * L8;
+    s = (u_nz8((((x >> b) & 0xFFULL) * L8) & 0x8040201008040201ULL) >> 7) * L8;
     
     // Final bit index
     return static_cast<size_t>(b + (((i_le8(s, l * L8)) >> 7) * L8 >> 56));
@@ -235,6 +235,8 @@ class BitsetWrapper {
         for (size_t i = 0; i < NUM_REGS; ++i)
             this->bitset[i] = vals[i];
     }
+
+    BitsetWrapper(const BitsetWrapper<N>&) = default;
     inline BitsetWrapper<N>& operator=(const BitsetWrapper<N>& other) {
         if (this != &other)
             std::memcpy(this->bitset, other.bitset, sizeof(bitset));

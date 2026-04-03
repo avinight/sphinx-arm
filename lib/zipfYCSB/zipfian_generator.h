@@ -92,7 +92,7 @@ class ZipfianGenerator {
     uint64_t count_for_zeta_; /// Number of items used to compute zeta_n
     uint64_t last_value_;
     std::mutex mutex_;
-    bool allow_count_decrease_;
+    [[maybe_unused]] bool allow_count_decrease_;
 };
 
 inline uint64_t ZipfianGenerator::Next(uint64_t num) {

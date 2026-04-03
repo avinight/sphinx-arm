@@ -25,7 +25,7 @@ TEST_CASE("ExtensionBlock: simple insertion") {
             const VALUE_TYPE value = i * 2 + 1;
             PAYLOAD_TYPE pt = ssdLog->write(key, value);
             auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-            auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, blkIdx, lslotIdx);
+            [[maybe_unused]] auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, blkIdx, lslotIdx);
             CHECK(eb.read(hash_val, *ssdLog.get(), FPIdx, blkIdx, lslotIdx)->key == key);
         }
         // eb.print();
@@ -39,7 +39,7 @@ TEST_CASE("ExtensionBlock: simple insertion") {
             const VALUE_TYPE value = i * 2 + 1;
             PAYLOAD_TYPE pt = ssdLog->write(key, value);
             auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-            auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, blkIdx, newLslotIdx);
+            [[maybe_unused]] auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, blkIdx, newLslotIdx);
             auto [oKey, oValue] = *(eb.read(hash_val, *ssdLog.get(), FPIdx, blkIdx, newLslotIdx));
             CHECK(oKey == key);
             CHECK(oValue == value);
@@ -56,7 +56,7 @@ TEST_CASE("ExtensionBlock: simple insertion") {
                 const VALUE_TYPE value = i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-                auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, blkIdx, newLslotIdx);
+                [[maybe_unused]] auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, blkIdx, newLslotIdx);
                 CHECK(eb.read(hash_val, *ssdLog.get(), FPIdx, blkIdx, lslotIdx)->key == key);
             }
         }
@@ -74,7 +74,7 @@ TEST_CASE("ExtensionBlock: simple insertion") {
                     const VALUE_TYPE value = i * 2 + 1;
                     PAYLOAD_TYPE pt = ssdLog->write(key, value);
                     auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-                    auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, newBlockIdx, newLslotIdx);
+                    [[maybe_unused]] auto info = eb.write(hash_val, *ssdLog.get(), FPIdx, pt, newBlockIdx, newLslotIdx);
                     CHECK(eb.read(hash_val, *ssdLog.get(), FPIdx, blkIdx, lslotIdx)->key == key);
                 }
             }
@@ -97,7 +97,7 @@ TEST_CASE("ExtensionBlock: normal block integration") {
                 const VALUE_TYPE value = j * 10 + i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-                auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
+                [[maybe_unused]] auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
                 auto [oKey, oValue] = *orgBlock.read(hash_val, *ssdLog.get(), FPIdx);
                 CHECK(oKey == key);
                 CHECK(oValue == value);
@@ -159,7 +159,7 @@ TEST_CASE("ExtensionBlock: a bit more challenging") {
                 const VALUE_TYPE value = j * 10 + i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-                auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
+                [[maybe_unused]] auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
                 CHECK(orgBlock.read(hash_val, *ssdLog.get(), FPIdx)->key == key);
             }
         }
@@ -185,6 +185,7 @@ TEST_CASE("ExtensionBlock: a bit more challenging") {
             for (auto i = 0; i < 4; i++) {
                 const KEY_TYPE key = (int64_t)getFP(j, 0, 0, FPIdx, fps[i]);
                 const VALUE_TYPE value = j * 10 + i * 2 + 1;
+                (void)value;
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
                 CHECK(orgBlock.read(hash_val, *ssdLog.get(), FPIdx)->key == key);
             }
@@ -220,7 +221,7 @@ TEST_CASE("ExtensionBlock: lslot extended") {
                 const VALUE_TYPE value = j * 10 + i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-                auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
+                [[maybe_unused]] auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
                 CHECK(orgBlock.read(hash_val, *ssdLog.get(), FPIdx)->key == key);
             }
         }
@@ -235,7 +236,7 @@ TEST_CASE("ExtensionBlock: lslot extended") {
         const VALUE_TYPE value = 2;
         auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
         PAYLOAD_TYPE pt = ssdLog->write(key, value);
-        auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
+        [[maybe_unused]] auto info = orgBlock.write(hash_val, *ssdLog.get(), FPIdx, pt);
 
         CHECK(info.rs == WriteReturnStatusLslotExtended);
         CHECK(info.blockInfo.isExtended == true);

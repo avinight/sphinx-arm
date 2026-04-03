@@ -13,6 +13,7 @@ set(CMAKE_BUILD_RPATH /usr/local/gcc-14.1.0/lib64)
 
 # Compiler flags interface
 add_library(project_compiler_flags INTERFACE)
+
 set_target_properties(project_compiler_flags PROPERTIES LINKER_LANGUAGE CXX)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(DEBUG)
@@ -20,12 +21,24 @@ endif()
 # Add the GCC and G++ compiler settings to the interface
 target_compile_options(project_compiler_flags INTERFACE
     $<$<COMPILE_LANG_AND_ID:CXX,GNU>: -std=c++23>
-    $<$<COMPILE_LANG_AND_ID:CXX,GNU>: -mbmi2 -march=native>
 )
+# Only add x86_64-specific flags on x86_64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "amd64")
+    # Only add -mbmi2 and -march=native for x86_64 and non-Apple platforms
+    if(NOT APPLE)
+        target_compile_options(project_compiler_flags INTERFACE
+            $<$<COMPILE_LANG_AND_ID:CXX,GNU>: -mbmi2 -march=native>
+        )
+    endif()
+endif()
 # RPATH settings to the interface
-target_link_libraries(project_compiler_flags INTERFACE
-    "-Wl,-rpath,/usr/local/gcc-14.1.0/lib64,-latomic"
-)
+if(NOT APPLE)
+    target_link_libraries(project_compiler_flags INTERFACE
+        "-Wl,-rpath,/usr/local/gcc-14.1.0/lib64,-latomic"
+    )
+else()
+    # On macOS, do not link -latomic
+endif()
 # Generate CLangD's LSP config
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -38,7 +51,6 @@ target_compile_options(project_compiler_flags INTERFACE
         "$<${msvc_cxx}:$<BUILD_INTERFACE:-W3>>"
 )
 #         "$<${gcc_like_cxx}:$<BUILD_INTERFACE:-Wall;-Wextra;-Winline;-Wshadow;-Wformat=2;-Wunused;-O3;-g;-fno-omit-frame-pointer>>"
-add_compile_options(-mbmi2 -march=native)
 
 # Setup Catch2, our unit testing framework
 add_subdirectory(lib/Catch2)
@@ -68,3 +80,4 @@ add_subdirectory(fingerprint_gen_helper)
 add_subdirectory(segment)
 add_subdirectory(buffer_pool2)
 add_subdirectory(xdp)
+add_subdirectory(zp7)

@@ -70,10 +70,9 @@ class Segment {
         return seg;
     }
     bool write(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
-                                                     SSDLog<Traits> &ssdLog,
-                                                     const PAYLOAD_TYPE &payload,
-                                                     const bool guarantee_update = false) {
-    SEGMENT_WRITE_START:
+               SSDLog<Traits> &ssdLog,
+               const PAYLOAD_TYPE &payload,
+               const bool guarantee_update = false) {
         size_t blkIdx = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
         auto blk = &blockList[blkIdx];
 
@@ -140,10 +139,9 @@ class Segment {
 
 #ifdef ENABLE_XDP
     bool writeGI(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
-                                                     const PAYLOAD_TYPE &payload,
-                                                     XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp,
-                                                     const bool guarantee_update = false) {
-    SEGMENT_WRITE_START:
+                 const PAYLOAD_TYPE &payload,
+                 XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp,
+                 const bool guarantee_update = false) {
         size_t blkIdx = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
         auto blk = &blockList[blkIdx];
 
@@ -211,7 +209,7 @@ class Segment {
             case RemoveReturnStatusSuccessful: {
                 break;
             }
-            case WriteReturnStatusLslotExtended: {
+            case RemoveReturnStatusLslotExtended: {
                 // std::cout << "2\n";
                 const size_t lslotBefore = ExtensionBlock<Traits>::CALCULATE_LSLOT_BEFORE(lslotIdx);
                 const auto exBlkIdx = ExtensionBlock<Traits>::CALCULATE_EXTENDED_BLOCK_INDEX(blkIdx, lslotIdx);
@@ -244,7 +242,7 @@ class Segment {
                 size_t actualIndex = lslotIdx - blk->get_block_info().firstExtendedLSlot;
                 auto cp_fingerprint_1 = fingerprint;
                 Block<Traits>::setLSlotIndexInFP(cp_fingerprint_1, blk->get_block_info().firstExtendedLSlot - 1, FP_index);
-                volatile auto r = blk->readDHT(cp_fingerprint_1, ssdLog, FP_index, true);
+                (void)blk->readDHT(cp_fingerprint_1, ssdLog, FP_index, true);
                 auto cp_fingerprint = fingerprint;
                 Block<Traits>::setLSlotIndexInFP(cp_fingerprint, actualIndex, FP_index);
                 return ptrsExBlks[blkIdx]->readDHT(cp_fingerprint, ssdLog, FP_index);
@@ -483,6 +481,7 @@ class Segment {
     void expand_gi(ExpandedSegment &s1, ExpandedSegment &s2,
                    size_t blkIdx, XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp,
                    BitsetWrapper<FINGERPRINT_SIZE> &fingerprint, size_t segmentCountLog) {
+        (void)segmentCountLog;
         auto &blk = blockList[blkIdx];
         const BlockInfo blkInfo = blk.get_block_info();
 

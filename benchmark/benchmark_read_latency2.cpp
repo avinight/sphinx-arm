@@ -132,7 +132,8 @@ int performQueries(
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < exp_keys.size(); ++i) {
         auto selectedKey = exp_keys[i];
-        dir.readSegmentSingleThread(selectedKey, ssdLog);
+        auto read_res = dir.readSegmentSingleThread(selectedKey, ssdLog);
+        (void)read_res;
     }
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
@@ -181,4 +182,3 @@ int main() {
     csvFile.close();
     return 0;
 }
-

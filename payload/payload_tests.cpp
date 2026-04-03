@@ -173,7 +173,7 @@ TEST_CASE("Payload: uint8_t functionality") {
     SECTION("Setting big number") {
         payload.set_payload_at(0, 255);
         REQUIRE(payload.get_payload_at(0) == 255);
-        payload.set_payload_at(1, 256);
+        payload.set_payload_at(1, static_cast<typename TestPayloadUint8::PAYLOAD_TYPE>(256));
         REQUIRE(payload.get_payload_at(1) == 0);  // Overflow
     }
 }
@@ -256,7 +256,7 @@ TEST_CASE("Payload: uint16_t functionality") {
     SECTION("Setting big number") {
         payload.set_payload_at(0, 65535);
         REQUIRE(payload.get_payload_at(0) == 65535);
-        payload.set_payload_at(1, 65536);
+        payload.set_payload_at(1, static_cast<typename TestPayloadUint16::PAYLOAD_TYPE>(65536));
         REQUIRE(payload.get_payload_at(1) == 0);  // Overflow
     }
     SECTION("Setting negative number") {
@@ -362,15 +362,16 @@ TEST_CASE("Payload: uint64_t functionality") {
     }
     SECTION("Setting big number") {
         payload.set_payload_at(0, 18446744073709551615ULL);
-        REQUIRE(payload.get_payload_at(0) == 18446744073709551615ULL);
-        payload.set_payload_at(1, 18446744073709551616ULL);
-        REQUIRE(payload.get_payload_at(1) == 0);  // Overflow
+        REQUIRE(static_cast<uint64_t>(payload.get_payload_at(0)) == 18446744073709551615ULL);
+        uint64_t maxPlusOne = 18446744073709551615ULL + 1ULL; 
+        payload.set_payload_at(1, maxPlusOne);
+        REQUIRE(static_cast<uint64_t>(payload.get_payload_at(1)) == 0); // Overflow
     }
     SECTION("Setting negative number") {
         payload.set_payload_at(0, -1);
-        REQUIRE(payload.get_payload_at(0) == 18446744073709551615ULL);  // Underflow
+        REQUIRE(static_cast<uint64_t>(payload.get_payload_at(0)) == 18446744073709551615ULL);  // Underflow
         payload.set_payload_at(1, -2);
-        REQUIRE(payload.get_payload_at(1) == 18446744073709551614ULL);  // Underflow
+        REQUIRE(static_cast<uint64_t>(payload.get_payload_at(1)) == 18446744073709551614ULL);  // Underflow
     }
     SECTION("Setting zero") {
         payload.set_payload_at(0, 0);
@@ -380,9 +381,9 @@ TEST_CASE("Payload: uint64_t functionality") {
     }
     SECTION("Setting maximum value") {
         payload.set_payload_at(0, 18446744073709551615ULL);
-        REQUIRE(payload.get_payload_at(0) == 18446744073709551615ULL);
+        REQUIRE(static_cast<uint64_t>(payload.get_payload_at(0)) == 18446744073709551615ULL);
         payload.set_payload_at(1, 18446744073709551615ULL);
-        REQUIRE(payload.get_payload_at(1) == 18446744073709551615ULL);
+        REQUIRE(static_cast<uint64_t>(payload.get_payload_at(1)) == 18446744073709551615ULL);
     }
 }
 
@@ -607,7 +608,8 @@ TEST_CASE("Payload Var Len: class tests") {
         REQUIRE(payload.get_payload_at(0) == 10);
         REQUIRE(payload.get_payload_at(1) == 11);
         REQUIRE(payload.set_payload_at(2, 2));
-        REQUIRE(payload.get_payload_at(2) == 256);
+        const auto entries_per_page = PAGE_SIZE / sizeof(typename TraitsLI::ENTRY_TYPE);
+        REQUIRE(payload.get_payload_at(2) == static_cast<int64_t>(entries_per_page));
     }
 
     SECTION("set_init_page_of_block and basic payload operations") {
@@ -624,7 +626,8 @@ TEST_CASE("Payload Var Len: class tests") {
 
         // Insert third payload of length 2
         REQUIRE(payload.set_payload_at(2, 2));
-        REQUIRE(payload.get_payload_at(2) == 256);
+        const auto entries_per_page = PAGE_SIZE / sizeof(typename TraitsLI::ENTRY_TYPE);
+        REQUIRE(payload.get_payload_at(2) == static_cast<int64_t>(entries_per_page));
     }
 
     SECTION("setting a zero-length payload should throw") {

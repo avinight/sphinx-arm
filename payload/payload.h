@@ -2,7 +2,13 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
-#include <immintrin.h>
+
+#if defined(__x86_64__) || defined(__i386__)
+#   include <immintrin.h>
+#elif defined(__aarch64__) || defined(__arm__)
+#   include <arm_neon.h>
+#endif
+
 #include <stdexcept>
 #include <array>
 

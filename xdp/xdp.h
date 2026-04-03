@@ -18,6 +18,9 @@
 #include "../directory/directory.h"
 #include "SSDLog.h"
 
+template<typename Traits> 
+class Directory;
+
 template <typename TraitsGI = DefaultTraits, typename TraitsLI = DefaultTraits,
           typename TraitsLIBuffer = DefaultTraits>
 class XDP {
@@ -50,6 +53,7 @@ class XDP {
     using ENTRY_TYPE = typename TraitsGI::ENTRY_TYPE;
     using KEY_TYPE = typename TraitsGI::KEY_TYPE;
     using VALUE_TYPE = typename TraitsGI::VALUE_TYPE;
+    using PAYLOAD_TYPE = typename TraitsGI::PAYLOAD_TYPE;
 
   public:
     XDP(size_t _max_li_entries)
@@ -199,7 +203,7 @@ class XDP {
                 // set exact position with offset
                 plNEW.set_init_page_of_block(new_pl_exact);
             }
-            plNEW.set_payload_at(k, new_pl == prev_new_pl ? 1 : 2);
+            plNEW.set_payload_at(k, new_pl == static_cast<typename TraitsGI::PAYLOAD_TYPE>(prev_new_pl) ? 1 : 2);
             prev_new_pl = new_pl;
         }
     }
@@ -236,7 +240,11 @@ class XDP {
         // std::cout << "local_index_footprint: " << local_index_footprint << std::endl;
         // std::cout << "mem_buffer_footprint: " << mem_buffer_footprint << std::endl;
 
-        return std::vector<double>({mem_gi_footprint, local_index_footprint, mem_buffer_footprint});
+        return std::vector<double>{
+            static_cast<double>(mem_gi_footprint), 
+            static_cast<double>(local_index_footprint), 
+            static_cast<double>(mem_buffer_footprint)
+        };
     }
 
     std::vector<double> get_memory_index_size() const {
@@ -249,11 +257,12 @@ class XDP {
         }
         // Buffer
         auto mem_buffer_footprint = dirLIBuffer->get_memory_footprint_total();
-        return std::vector<double>({mem_gi_footprint, local_index_footprint, mem_buffer_footprint});
-    }
-        
-    
-
+        return std::vector<double>{
+            static_cast<double>(mem_gi_footprint),
+            static_cast<double>(local_index_footprint),
+            static_cast<double>(mem_buffer_footprint)
+        };
+    }  
     auto get_memory_footprint_per_entry(size_t i) const {
         auto memory = get_memory_footprint();
         auto sum = memory[0] + memory[1] + memory[2];

@@ -103,6 +103,7 @@ int putFilter(memento::Memento<Traits::IS_INFINI> &filter, const SSDLog<Traits> 
     if (!flag) {
         return filter.insert(selectedKey, pt, memento::Memento<true>::flag_no_lock);
     }
+    return 0;
 }
 //----------------------------------------------------------------------
 // Modified Functions: Run, RunPHT, and RunFilter with averaged (smoothed)
@@ -138,7 +139,8 @@ void Run(Directory<Traits>& dir,
         // For the query, we now generate a random key in the range [1, i]
         size_t randomKey = get_random_key(1, i);
         auto start_query = std::chrono::high_resolution_clock::now();
-        dir.readSegmentSingleThread(randomKey, ssdLog);
+        auto read_res = dir.readSegmentSingleThread(randomKey, ssdLog);
+        (void)read_res;
         auto end_query = std::chrono::high_resolution_clock::now();
         auto du_query = std::chrono::duration_cast<std::chrono::nanoseconds>(end_query - start_query).count();
 
@@ -204,20 +206,20 @@ void RunPHT(memento::Memento<true>& filter,
         auto start_insertion = std::chrono::high_resolution_clock::now();
         {
             auto pt = ssdLog.write(key, value);
-            auto res = get_range<Traits>(filter, key);
+            auto range_res = get_range<Traits>(filter, key);
             bool stashed = false;
-            for (auto &r : res) {
+            for (auto &r : range_res) {
                 DefaultTraits::ENTRY_TYPE entry_type;
                 ssdLog.read(r, entry_type);
-                if (entry_type.key != key) {
+                if (entry_type.key != static_cast<decltype(entry_type.key)>(key)) {
                     stash_dict[key] = pt;
                     stashed = true;
                     break;
                 }
             }
             if (!stashed) {
-                auto res = filter.insert(key, pt, memento::Memento<true>::flag_no_lock);
-                if (res == memento::Memento<true>::err_no_space)
+                auto insert_res = filter.insert(key, pt, memento::Memento<true>::flag_no_lock);
+                if (insert_res == memento::Memento<true>::err_no_space)
                     break;
             }
         }
@@ -232,7 +234,7 @@ void RunPHT(memento::Memento<true>& filter,
             DefaultTraits::ENTRY_TYPE entry_type;
             if (it != stash_dict.end()) {
                 ssdLog.read(it->second, entry_type);
-                if (entry_type.key != randomKey) {
+                if (entry_type.key != static_cast<decltype(entry_type.key)>(randomKey)) {
                     readFilter<Traits>(filter, ssdLog, randomKey);
                 }
             } else {
@@ -278,7 +280,7 @@ void RunFilter(memento::Memento<Traits::IS_INFINI>& filter,
                size_t numKeys,
                bool should_exp = true)
 {
-    auto init_slot_log = std::floor(std::log2(filter.metadata_->nslots));
+    [[maybe_unused]] auto init_slot_log = std::floor(std::log2(filter.metadata_->nslots));
     Metrics metrics;
     uint64_t total_insertion_time = 0;
     uint64_t total_query_time = 0;

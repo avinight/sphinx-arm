@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <cstdlib>  // for getenv
 #include <random>
+#include <array>
 
 // Include your Directory header, SSDLog, etc.
 #include "../directory/directory.h"
@@ -65,7 +66,7 @@ double measureReadThroughput(Directory<Traits>& dir,
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    for (auto _: keys) {
+    for (size_t i = 0; i < keys.size(); ++i) {
         auto p = dist(gen);
         futures.push_back(dir.readSegment(p, ssdLog));
     }
@@ -92,9 +93,8 @@ double measureRandomReadThroughput(Directory<Traits>& dir,
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    for (auto key : keys) {
-        // generate  payload
-
+    for (size_t i = 0; i < keys.size(); ++i) {
+        // generate payload
         auto p = dist(gen);
         futures.push_back(dir.readRandom(p, ssdLog));
     }
@@ -115,13 +115,13 @@ double measureRandomReadThroughput(Directory<Traits>& dir,
 // ***********************************************************
 int main()
 {
-    auto modes = {
+    const std::array<std::string, 1> modes = {
         // "optane",
         "ssd",
     };
     std::filesystem::create_directories(HOME + "/research/sphinx/benchmark/data-mt");
     // Open CSV file for throughput results
-    for (auto mode: modes) {
+    for (const std::string &mode : modes) {
         std::ofstream csvFile(HOME + "/research/sphinx/benchmark/data-mt/throughput_vs_threads_4ReserveBits" + mode + ".csv");
         std::string ssdFilePath;
         if (mode == "optane") {
@@ -196,7 +196,7 @@ int main()
 
         csvFile.close();
     }
-    for (auto mode: modes) {
+    for (const std::string &mode : modes) {
         std::ofstream csvFile(HOME + "/research/sphinx/benchmark/data-mt/throughput_vs_threads_" + mode + ".csv");
         std::string ssdFilePath;
         if (mode == "optane") {

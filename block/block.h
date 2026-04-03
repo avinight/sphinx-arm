@@ -1,7 +1,9 @@
 #pragma once
 #include <cstddef>  // for size_t
 #if defined(__x86_64__) || defined(__i386__)
-#include <x86intrin.h>
+#   include <immintrin.h>
+// #elif defined(__aarch64__) || defined(__arm__)
+// #   include <arm_neon.h>
 #endif
 #include <cstdint>
 #include <iostream>
@@ -9,6 +11,7 @@
 #include <string>
 #include <limits>
 #include <type_traits>
+#include <concepts>
 
 #include "../BST/BST.h"
 #include "../SSDLog/SSDLog.h"
@@ -65,29 +68,29 @@ struct RemoveReturnInfo {
 };
 
 // Naive bit compression and expansion functions for arbitrary unsigned integer types
-template <typename T>
-constexpr T bit_compress(T x, T m) noexcept 
-{
-    T result = 0;
-    for (int i = 0, j = 0; i < std::numeric_limits<T>::digits; ++i) {
-        bool mask_bit = (m >> i) & 1;
-        result |= (mask_bit & (x >> i)) << j;
-        j += mask_bit;
-    }
-    return result;
-}
+// template <typename T>
+// constexpr T bit_compress(T x, T m) noexcept 
+// {
+//     T result = 0;
+//     for (int i = 0, j = 0; i < std::numeric_limits<T>::digits; ++i) {
+//         bool mask_bit = (m >> i) & 1;
+//         result |= (mask_bit & (x >> i)) << j;
+//         j += mask_bit;
+//     }
+//     return result;
+// }
 
-template<unsigned_integral T>
-constexpr T bit_expand(T x, T m) noexcept
-{
-    T result = 0;
-    for (int i = 0, j = 0; i < numeric_limits<T>::digits; ++i) {
-        bool mask_bit = (m >> i) & 1;
-        result |= (mask_bit & (x >> j)) << i;
-        j += mask_bit;
-    }
-    return result;
-}
+// template<std::unsigned_integral T>
+// constexpr T bit_expand(T x, T m) noexcept
+// {
+//     T result = 0;
+//     for (int i = 0, j = 0; i < std::numeric_limits<T>::digits; ++i) {
+//         bool mask_bit = (m >> i) & 1;
+//         result |= (mask_bit & (x >> j)) << i;
+//         j += mask_bit;
+//     }
+//     return result;
+// }
 
 template <typename Traits = DefaultTraits>
 class Block {
@@ -193,13 +196,13 @@ class Block {
     inline TenInfo getTenBeforeAndTen(size_t lslotIdx) const {
         const auto rank1 = bits.rank(lslotIdx);
         if (rank1 == 0) {
-            return TenInfo{0, bits.get(lslotIdx) ? bits.select(1, 1) + 1 : 0};
+            return TenInfo{0, static_cast<uint8_t>(bits.get(lslotIdx) ? bits.select(1, 1) + 1 : 0)};
         }
         if (bits.get(lslotIdx)) {
             auto [fst, snd] = bits.select_two(rank1, rank1 + 1, 1);
             return TenInfo{static_cast<uint8_t>(fst + 1), static_cast<uint8_t>(snd - fst)};
         }
-        return TenInfo{bits.select(rank1, 1) + 1, 0};
+        return TenInfo{static_cast<uint8_t>(bits.select(rank1, 1) + 1), 0};
     }
     // return start_index_lslot, offset
     std::pair<size_t, size_t> get_index(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint, size_t FP_index) {
@@ -565,207 +568,6 @@ class Block {
         std::cout << "\tRemaining Payload: " << b->remainingPayload << std::endl;
     }
 
-#ifdef ENABLE_XDP
-    WriteReturnInfo writeGIEx(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
-                              BitsetWrapper<FINGERPRINT_SIZE> &org_fingerprint,
-                            const size_t FP_index, const PAYLOAD_TYPE &payload,
-                            XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp,
-                            const bool guarantee_update = false) {
-        if constexpr (Traits::WRITE_STRATEGY != 0)
-            throw std::invalid_argument("writeGI is not supported in this version");
-        WriteReturnInfo info;
-        auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
-        info.blockInfo = get_block_info();
-        if (info.blockInfo.remainingBits <= Traits::EXTENSION_THRESHOLD && !guarantee_update) {
-            // this should be first
-            info.rs = WriteReturnStatusNotEnoughBlockSpace;
-            return info;
-        }
-        if (!info.blockInfo.remainingPayload && !guarantee_update) {
-            info.rs = WriteReturnStatusNotEnoughPayloadSpace;
-            return info;
-        }
-        if (slot_index >= static_cast<int16_t>(info.blockInfo.firstExtendedLSlot)) {
-            info.rs = WriteReturnStatusLslotExtended;
-            return info;
-        }
-        size_t payload_idx;
-        size_t ten = get_ten(slot_index);
-        if (ten == 0) {
-            payload_idx = get_index_start_lslot(slot_index);
-            bits.set(slot_index, true);
-            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
-            bits.set(REGISTER_SIZE + payload_idx, true);
-        } else {
-            size_t start_lslot_index, start_next_lslot_index;
-
-            auto [current_slot_start_pos, starting_payload_offset, matched_offset, next_slot_start_pos] = get_slot_info(fingerprint, FP_index, slot_index);
-            start_lslot_index = current_slot_start_pos;
-            start_next_lslot_index = next_slot_start_pos;
-            payload_idx = starting_payload_offset + matched_offset;
-
-            BST<N> bst(ten, start_lslot_index, FP_index);
-            bst.createBST(bits);
-            auto payload_old = payload_list[payload_idx];
-            size_t first_diff = REGISTER_SIZE;
-            if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
-                auto [valid_bits, extra_bit] = payload_list.get_extra_bits_at(payload_idx);
-                auto temp_fp = fingerprint;
-                temp_fp.shift_smart(-static_cast<int>(FP_index), 0);
-                first_diff = __builtin_ctzll(extra_bit ^ temp_fp.bitset[0]) + FP_index;
-                if (first_diff >= valid_bits + FP_index) {
-                    first_diff = REGISTER_SIZE;
-                }
-            }
-            if (first_diff == REGISTER_SIZE) {
-                ENTRY_TYPE e;
-                {
-                    // TODO: fix this oracle
-                    auto li_idx_oracle = payload_old;
-                    std::optional<ENTRY_TYPE> e2 = xdp->performReadTaskIdx(org_fingerprint, li_idx_oracle);
-                    if (!e2) {
-                        throw std::runtime_error("Failed to read from SSDLog");
-                    }
-                    e.key = e2->key;
-                    e.value = e2->value;
-                }
-
-
-
-                auto old_fp = Hashing<Traits>::hash_digest(e.key);
-                if (compareTwoFP(old_fp, fingerprint, FP_index)) {
-                    // update
-                    goto PAYLOAD_SETTER_MAIN;
-                }
-                if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
-                    payload_list.set_extra_bits_at(old_fp.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
-                setLSlotIndexInFP(old_fp, slot_index, FP_index);  // needed to be updated for extended blocks
-                first_diff = bst.get_first_diff_index(old_fp, fingerprint);
-            }
-
-            bst.insert(fingerprint, first_diff);
-            auto rep = bst.getBitRepWrapper();
-            const auto step = static_cast<int>(rep.firstInvalidIndex) - static_cast<int>(start_next_lslot_index - start_lslot_index);
-            if (step + 1 > static_cast<int>(info.blockInfo.remainingBits) + 1) {
-                info.rs = WriteReturnStatusNotEnoughBlockSpace;
-                info.least_space_needed = step + 1;
-                return info;
-            }
-            bits.shift_smart(step, start_lslot_index, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
-            bits.set_fast_two_reg(start_lslot_index, start_lslot_index + rep.firstInvalidIndex, rep.bw.bitset[0]);
-            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
-            bits.set(REGISTER_SIZE + payload_idx, false);
-            payload_idx = bst.getOffsetIdx(fingerprint) + starting_payload_offset;
-        }
-        payload_list.shift_right_from_index(payload_idx, 1, get_max_index_based_on_remaining_payloads(static_cast<int>(info.blockInfo.remainingPayload)));
-        PAYLOAD_SETTER_MAIN:
-        payload_list.set_payload_at(payload_idx, payload);
-        if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
-            payload_list.set_extra_bits_at(fingerprint.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
-
-        info.blockInfo = get_block_info();
-        return info;
-    }
-    WriteReturnInfo writeGI(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
-                                           const size_t FP_index, const PAYLOAD_TYPE &payload,
-                                           XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp,
-                                           const bool guarantee_update = false) {
-        if constexpr (Traits::WRITE_STRATEGY != 0) 
-            throw std::invalid_argument("writeGI is not supported in this version");
-        WriteReturnInfo info;
-        auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
-        info.blockInfo = get_block_info();
-        if (info.blockInfo.remainingBits <= Traits::EXTENSION_THRESHOLD && !guarantee_update) {
-            // this should be first
-            info.rs = WriteReturnStatusNotEnoughBlockSpace;
-            return info;
-        }
-        if (!info.blockInfo.remainingPayload && !guarantee_update) {
-            info.rs = WriteReturnStatusNotEnoughPayloadSpace;
-            return info;
-        }
-        if (slot_index >= static_cast<int16_t>(info.blockInfo.firstExtendedLSlot)) {
-            info.rs = WriteReturnStatusLslotExtended;
-            return info;
-        }
-        size_t payload_idx;
-        size_t ten = get_ten(slot_index);
-        if (ten == 0) {
-            payload_idx = get_index_start_lslot(slot_index);
-            bits.set(slot_index, true);
-            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
-            bits.set(REGISTER_SIZE + payload_idx, true);
-        } else {
-            size_t start_lslot_index, start_next_lslot_index;
-
-            auto [current_slot_start_pos, starting_payload_offset, matched_offset, next_slot_start_pos] = get_slot_info(fingerprint, FP_index, slot_index);
-            start_lslot_index = current_slot_start_pos;
-            start_next_lslot_index = next_slot_start_pos;
-            payload_idx = starting_payload_offset + matched_offset;
-            
-            BST<N> bst(ten, start_lslot_index, FP_index);
-            bst.createBST(bits);
-            auto payload_old = payload_list[payload_idx];
-            size_t first_diff = REGISTER_SIZE;
-            if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
-                auto [valid_bits, extra_bit] = payload_list.get_extra_bits_at(payload_idx);
-                auto temp_fp = fingerprint;
-                temp_fp.shift_smart(-static_cast<int>(FP_index), 0);
-                first_diff = __builtin_ctzll(extra_bit ^ temp_fp.bitset[0]) + FP_index;
-                if (first_diff >= valid_bits + FP_index) {
-                    first_diff = REGISTER_SIZE;
-                }
-            }
-            if (first_diff == REGISTER_SIZE) {
-                ENTRY_TYPE e;
-                {
-                    // TODO: fix this oracle
-                    auto li_idx_oracle = payload_old;
-                    std::optional<ENTRY_TYPE> e2 = xdp->performReadTaskIdx(fingerprint, li_idx_oracle);
-                    if (!e2) {
-                        throw std::runtime_error("Failed to read from SSDLog");
-                    }
-                    e.key = e2->key;
-                    e.value = e2->value;
-                }
-                
-
-
-                auto old_fp = Hashing<Traits>::hash_digest(e.key);
-                if (compareTwoFP(old_fp, fingerprint, FP_index)) {
-                    // update
-                    goto PAYLOAD_SETTER_MAIN;
-                }
-                if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
-                    payload_list.set_extra_bits_at(old_fp.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
-                setLSlotIndexInFP(old_fp, slot_index, FP_index);  // needed to be updated for extended blocks
-                first_diff = bst.get_first_diff_index(old_fp, fingerprint);
-            }
-
-            bst.insert(fingerprint, first_diff);
-            auto rep = bst.getBitRepWrapper();
-            const auto step = static_cast<int>(rep.firstInvalidIndex) - static_cast<int>(start_next_lslot_index - start_lslot_index);
-            if (step + 1 > static_cast<int>(info.blockInfo.remainingBits) + 1) {
-                info.rs = WriteReturnStatusNotEnoughBlockSpace;
-                info.least_space_needed = step + 1;
-                return info;
-            }
-            bits.shift_smart(step, start_lslot_index, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
-            bits.set_fast_two_reg(start_lslot_index, start_lslot_index + rep.firstInvalidIndex, rep.bw.bitset[0]);
-            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
-            bits.set(REGISTER_SIZE + payload_idx, false);
-            payload_idx = bst.getOffsetIdx(fingerprint) + starting_payload_offset;
-        }
-        payload_list.shift_right_from_index(payload_idx, 1, get_max_index_based_on_remaining_payloads(static_cast<int>(info.blockInfo.remainingPayload)));
-        PAYLOAD_SETTER_MAIN:
-        payload_list.set_payload_at(payload_idx, payload);
-        if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
-            payload_list.set_extra_bits_at(fingerprint.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
-
-        info.blockInfo = get_block_info();
-        return info;
-    }
-#endif
     WriteReturnInfo write(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint, SSDLog<Traits> &ssdLog,
                                            const size_t FP_index, const PAYLOAD_TYPE &payload,
                                            const bool guarantee_update = false) {
@@ -783,7 +585,7 @@ class Block {
             info.rs = WriteReturnStatusNotEnoughPayloadSpace;
             return info;
         }
-        if (slot_index >= static_cast<int16_t>(info.blockInfo.firstExtendedLSlot)) {
+        if (slot_index >= static_cast<size_t>(info.blockInfo.firstExtendedLSlot)) {
             info.rs = WriteReturnStatusLslotExtended;
             return info;
         }
@@ -878,7 +680,7 @@ class Block {
             info.rs = WriteReturnStatusNotEnoughPayloadSpace;
             return info;
         }
-        if (slot_index >= static_cast<int16_t>(info.blockInfo.firstExtendedLSlot)) {
+        if (slot_index >= static_cast<size_t>(info.blockInfo.firstExtendedLSlot)) {
             info.rs = WriteReturnStatusLslotExtended;
             return info;
         }
@@ -968,7 +770,7 @@ class Block {
         auto ten = get_ten(slot_index);
         BlockInfo blkInfoP = get_block_info();
         info->blockInfo = std::make_unique<BlockInfo>(blkInfoP);
-        if (slot_index >= static_cast<int16_t>(info->blockInfo->firstExtendedLSlot)) {
+        if (slot_index >= static_cast<size_t>(info->blockInfo->firstExtendedLSlot)) {
             info->rs = RemoveReturnStatusLslotExtended;
             return info;
         }
@@ -1047,7 +849,7 @@ class Block {
             zero_count = 0;
         } else if (bst.root == nullptr) {  // ten 1
             zero_count = get_first_bit_fingerprint(ssdLog, payload_start_idx, fp_index);
-        } else if (bst.root->index == (int)fp_index) {  // ten > 1
+        } else if (bst.root->index == fp_index) {  // ten > 1
             zero_count = bst.getTen(bst.root->left);
         } else {  // ten > 1 but first node's index is > 0
             zero_count = get_first_bit_fingerprint(ssdLog, payload_start_idx, fp_index) ? bst.getTenSize() : 0;
@@ -1055,23 +857,6 @@ class Block {
         return zero_count;
     }
 
-#ifdef ENABLE_XDP
-    size_t get_count_zero_start_gi(BST<N> &bst, const size_t payload_start_idx, XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp,
-                                   BitsetWrapper<FINGERPRINT_SIZE> fp_artificial) {
-        const auto fp_index = bst.getFPIndex();
-        size_t zero_count;
-        if (!bst.getTenSize()) {  // ten 0
-            zero_count = 0;
-        } else if (bst.root == nullptr) {  // ten 1
-            zero_count = get_first_bit_fingerprint_gi(payload_start_idx, fp_index, xdp, fp_artificial);
-        } else if (bst.root->index == (int)fp_index) {  // ten > 1
-            zero_count = bst.getTen(bst.root->left);
-        } else {  // ten > 1 but first node's index is > 0
-            zero_count = get_first_bit_fingerprint_gi(payload_start_idx, fp_index, xdp, fp_artificial) ? bst.getTenSize() : 0;
-        }
-        return zero_count;
-    }
-#endif
     size_t get_first_bit_fingerprint(SSDLog<Traits> &ssdLog, const size_t payload_start_idx, size_t fp_index) {
         if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
             auto [valid_bits, extra_bits] = payload_list.get_extra_bits_at(payload_start_idx);
@@ -1094,40 +879,7 @@ class Block {
         return bit ? 0 : 1;
     }
 
-#ifdef ENABLE_XDP
-    size_t get_first_bit_fingerprint_gi(const size_t payload_start_idx, size_t fp_index,
-                                        XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp, BitsetWrapper<FINGERPRINT_SIZE> fp_artificial) {
-        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
-            auto [valid_bits, extra_bits] = payload_list.get_extra_bits_at(payload_start_idx);
-            if (valid_bits) {
-                if (extra_bits % 2 == 0)
-                    return 1;
-                else
-                    return 0;
-            }
-        }
-        auto payload = payload_list.get_payload_at(payload_start_idx);
-        ENTRY_TYPE kv;
-        bool bit;
-        {
-            auto li_idx_oracle = payload;
-            std::optional<ENTRY_TYPE> e2 = xdp->performReadTaskIdx(fp_artificial, li_idx_oracle);
-            if (!e2) {
-                throw std::runtime_error("Failed to read from SSDLog");
-            }
-            auto fp2 = Hashing<Traits>::hash_digest(e2->key);
-            auto bit2 = fp2.get(fp_index);
 
-            bit = bit2;
-        }
-//        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
-//            auto extra = fp.range_fast_one_reg(0, fp_index, REGISTER_SIZE);
-//            payload_list.set_extra_bits_at(extra, payload_start_idx, 0);
-//        }
-        return bit ? 0 : 1;
-    }
-
-#endif
     [[nodiscard]] size_t get_last_lslot_idx() const {
         return COUNT_SLOT - bits.get_leading_zeros(bits.NUM_REGS - 1) - 1;
     }
@@ -1162,4 +914,290 @@ class Block {
             return 0;
         return (float) total_age / (float) total_ten;
     }
+#ifdef ENABLE_XDP
+    template <typename XDPType>
+    WriteReturnInfo writeGIEx(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                              BitsetWrapper<FINGERPRINT_SIZE> &org_fingerprint,
+                              const size_t FP_index, const PAYLOAD_TYPE &payload,
+                              XDPType *xdp, 
+                              const bool guarantee_update = false);
+
+    template <typename XDPType>
+    WriteReturnInfo writeGI(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                            const size_t FP_index, const PAYLOAD_TYPE &payload,
+                            XDPType *xdp, 
+                            const bool guarantee_update = false);
+
+    template <typename XDPType>
+    size_t get_count_zero_start_gi(BST<N> &bst, const size_t payload_start_idx, 
+                                   XDPType *xdp,
+                                   BitsetWrapper<FINGERPRINT_SIZE> fp_artificial);
+
+    template <typename XDPType>
+    size_t get_first_bit_fingerprint_gi(const size_t payload_start_idx, size_t fp_index,
+                                        XDPType *xdp, 
+                                        BitsetWrapper<FINGERPRINT_SIZE> fp_artificial);
+#endif
 };
+
+#ifdef ENABLE_XDP
+
+    template <typename Traits>
+    template <typename XDPType>
+    WriteReturnInfo Block<Traits>::writeGIEx(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                                        BitsetWrapper<FINGERPRINT_SIZE> &org_fingerprint,
+                                        const size_t FP_index, const PAYLOAD_TYPE &payload,
+                                        XDPType *xdp, const bool guarantee_update) {
+        if constexpr (Traits::WRITE_STRATEGY != 0)
+            throw std::invalid_argument("writeGI is not supported in this version");
+        WriteReturnInfo info;
+        auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
+        info.blockInfo = get_block_info();
+        if (info.blockInfo.remainingBits <= Traits::EXTENSION_THRESHOLD && !guarantee_update) {
+            // this should be first
+            info.rs = WriteReturnStatusNotEnoughBlockSpace;
+            return info;
+        }
+        if (!info.blockInfo.remainingPayload && !guarantee_update) {
+            info.rs = WriteReturnStatusNotEnoughPayloadSpace;
+            return info;
+        }
+        if (slot_index >= static_cast<size_t>(info.blockInfo.firstExtendedLSlot)) {
+            info.rs = WriteReturnStatusLslotExtended;
+            return info;
+        }
+        size_t payload_idx;
+        size_t ten = get_ten(slot_index);
+        if (ten == 0) {
+            payload_idx = get_index_start_lslot(slot_index);
+            bits.set(slot_index, true);
+            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
+            bits.set(REGISTER_SIZE + payload_idx, true);
+        } else {
+            size_t start_lslot_index, start_next_lslot_index;
+
+            auto [current_slot_start_pos, starting_payload_offset, matched_offset, next_slot_start_pos] = get_slot_info(fingerprint, FP_index, slot_index);
+            start_lslot_index = current_slot_start_pos;
+            start_next_lslot_index = next_slot_start_pos;
+            payload_idx = starting_payload_offset + matched_offset;
+
+            BST<N> bst(ten, start_lslot_index, FP_index);
+            bst.createBST(bits);
+            auto payload_old = payload_list[payload_idx];
+            size_t first_diff = REGISTER_SIZE;
+            if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
+                auto [valid_bits, extra_bit] = payload_list.get_extra_bits_at(payload_idx);
+                auto temp_fp = fingerprint;
+                temp_fp.shift_smart(-static_cast<int>(FP_index), 0);
+                first_diff = __builtin_ctzll(extra_bit ^ temp_fp.bitset[0]) + FP_index;
+                if (first_diff >= valid_bits + FP_index) {
+                    first_diff = REGISTER_SIZE;
+                }
+            }
+            if (first_diff == REGISTER_SIZE) {
+                ENTRY_TYPE e;
+                {
+                    // TODO: fix this oracle
+                    auto li_idx_oracle = payload_old;
+                    std::optional<ENTRY_TYPE> e2 = xdp->performReadTaskIdx(org_fingerprint, li_idx_oracle);
+                    if (!e2) {
+                        throw std::runtime_error("Failed to read from SSDLog");
+                    }
+                    e.key = e2->key;
+                    e.value = e2->value;
+                }
+
+
+
+                auto old_fp = Hashing<Traits>::hash_digest(e.key);
+                if (compareTwoFP(old_fp, fingerprint, FP_index)) {
+                    // update
+                    goto PAYLOAD_SETTER_MAIN;
+                }
+                if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
+                    payload_list.set_extra_bits_at(old_fp.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
+                setLSlotIndexInFP(old_fp, slot_index, FP_index);  // needed to be updated for extended blocks
+                first_diff = bst.get_first_diff_index(old_fp, fingerprint);
+            }
+
+            bst.insert(fingerprint, first_diff);
+            auto rep = bst.getBitRepWrapper();
+            const auto step = static_cast<int>(rep.firstInvalidIndex) - static_cast<int>(start_next_lslot_index - start_lslot_index);
+            if (step + 1 > static_cast<int>(info.blockInfo.remainingBits) + 1) {
+                info.rs = WriteReturnStatusNotEnoughBlockSpace;
+                info.least_space_needed = step + 1;
+                return info;
+            }
+            bits.shift_smart(step, start_lslot_index, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
+            bits.set_fast_two_reg(start_lslot_index, start_lslot_index + rep.firstInvalidIndex, rep.bw.bitset[0]);
+            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
+            bits.set(REGISTER_SIZE + payload_idx, false);
+            payload_idx = bst.getOffsetIdx(fingerprint) + starting_payload_offset;
+        }
+        payload_list.shift_right_from_index(payload_idx, 1, get_max_index_based_on_remaining_payloads(static_cast<int>(info.blockInfo.remainingPayload)));
+        PAYLOAD_SETTER_MAIN:
+        payload_list.set_payload_at(payload_idx, payload);
+        if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
+            payload_list.set_extra_bits_at(fingerprint.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
+
+        info.blockInfo = get_block_info();
+        return info;
+    }
+
+    template <typename Traits>
+    template <typename XDPType>
+    WriteReturnInfo Block<Traits>::writeGI(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                                      const size_t FP_index, const PAYLOAD_TYPE &payload,
+                                      XDPType *xdp, const bool guarantee_update) {
+        if constexpr (Traits::WRITE_STRATEGY != 0) 
+            throw std::invalid_argument("writeGI is not supported in this version");
+        WriteReturnInfo info;
+        auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
+        info.blockInfo = get_block_info();
+        if (info.blockInfo.remainingBits <= Traits::EXTENSION_THRESHOLD && !guarantee_update) {
+            // this should be first
+            info.rs = WriteReturnStatusNotEnoughBlockSpace;
+            return info;
+        }
+        if (!info.blockInfo.remainingPayload && !guarantee_update) {
+            info.rs = WriteReturnStatusNotEnoughPayloadSpace;
+            return info;
+        }
+        if (slot_index >= static_cast<size_t>(info.blockInfo.firstExtendedLSlot)) {
+            info.rs = WriteReturnStatusLslotExtended;
+            return info;
+        }
+        size_t payload_idx;
+        size_t ten = get_ten(slot_index);
+        if (ten == 0) {
+            payload_idx = get_index_start_lslot(slot_index);
+            bits.set(slot_index, true);
+            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
+            bits.set(REGISTER_SIZE + payload_idx, true);
+        } else {
+            size_t start_lslot_index, start_next_lslot_index;
+
+            auto [current_slot_start_pos, starting_payload_offset, matched_offset, next_slot_start_pos] = get_slot_info(fingerprint, FP_index, slot_index);
+            start_lslot_index = current_slot_start_pos;
+            start_next_lslot_index = next_slot_start_pos;
+            payload_idx = starting_payload_offset + matched_offset;
+            
+            BST<N> bst(ten, start_lslot_index, FP_index);
+            bst.createBST(bits);
+            auto payload_old = payload_list[payload_idx];
+            size_t first_diff = REGISTER_SIZE;
+            if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
+                auto [valid_bits, extra_bit] = payload_list.get_extra_bits_at(payload_idx);
+                auto temp_fp = fingerprint;
+                temp_fp.shift_smart(-static_cast<int>(FP_index), 0);
+                first_diff = __builtin_ctzll(extra_bit ^ temp_fp.bitset[0]) + FP_index;
+                if (first_diff >= valid_bits + FP_index) {
+                    first_diff = REGISTER_SIZE;
+                }
+            }
+            if (first_diff == REGISTER_SIZE) {
+                ENTRY_TYPE e;
+                {
+                    // TODO: fix this oracle
+                    auto li_idx_oracle = payload_old;
+                    std::optional<ENTRY_TYPE> e2 = xdp->performReadTaskIdx(fingerprint, li_idx_oracle);
+                    if (!e2) {
+                        throw std::runtime_error("Failed to read from SSDLog");
+                    }
+                    e.key = e2->key;
+                    e.value = e2->value;
+                }
+                
+
+
+                auto old_fp = Hashing<Traits>::hash_digest(e.key);
+                if (compareTwoFP(old_fp, fingerprint, FP_index)) {
+                    // update
+                    goto PAYLOAD_SETTER_MAIN;
+                }
+                if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
+                    payload_list.set_extra_bits_at(old_fp.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
+                setLSlotIndexInFP(old_fp, slot_index, FP_index);  // needed to be updated for extended blocks
+                first_diff = bst.get_first_diff_index(old_fp, fingerprint);
+            }
+
+            bst.insert(fingerprint, first_diff);
+            auto rep = bst.getBitRepWrapper();
+            const auto step = static_cast<int>(rep.firstInvalidIndex) - static_cast<int>(start_next_lslot_index - start_lslot_index);
+            if (step + 1 > static_cast<int>(info.blockInfo.remainingBits) + 1) {
+                info.rs = WriteReturnStatusNotEnoughBlockSpace;
+                info.least_space_needed = step + 1;
+                return info;
+            }
+            bits.shift_smart(step, start_lslot_index, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
+            bits.set_fast_two_reg(start_lslot_index, start_lslot_index + rep.firstInvalidIndex, rep.bw.bitset[0]);
+            bits.shift_smart(1, REGISTER_SIZE + payload_idx, CALCULATE_LAST_AVAILABLE_INDEX(info.blockInfo.firstExtendedLSlot));
+            bits.set(REGISTER_SIZE + payload_idx, false);
+            payload_idx = bst.getOffsetIdx(fingerprint) + starting_payload_offset;
+        }
+        payload_list.shift_right_from_index(payload_idx, 1, get_max_index_based_on_remaining_payloads(static_cast<int>(info.blockInfo.remainingPayload)));
+        PAYLOAD_SETTER_MAIN:
+        payload_list.set_payload_at(payload_idx, payload);
+        if constexpr (Traits::NUMBER_EXTRA_BITS > 1)
+            payload_list.set_extra_bits_at(fingerprint.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_idx, 0);
+
+        info.blockInfo = get_block_info();
+        return info;
+    }
+#endif
+
+#ifdef ENABLE_XDP
+    template <typename Traits>
+    template <typename XDPType>
+    size_t Block<Traits>::get_count_zero_start_gi(BST<N> &bst, const size_t payload_start_idx, 
+                                             XDPType *xdp, BitsetWrapper<FINGERPRINT_SIZE> fp_artificial) {
+        const auto fp_index = bst.getFPIndex();
+        size_t zero_count;
+        if (!bst.getTenSize()) {  // ten 0
+            zero_count = 0;
+        } else if (bst.root == nullptr) {  // ten 1
+            zero_count = get_first_bit_fingerprint_gi(payload_start_idx, fp_index, xdp, fp_artificial);
+        } else if (bst.root->index == fp_index) {  // ten > 1
+            zero_count = bst.getTen(bst.root->left);
+        } else {  // ten > 1 but first node's index is > 0
+            zero_count = get_first_bit_fingerprint_gi(payload_start_idx, fp_index, xdp, fp_artificial) ? bst.getTenSize() : 0;
+        }
+        return zero_count;
+    }
+#endif
+
+#ifdef ENABLE_XDP
+    template <typename Traits>
+    template <typename XDPType>
+    size_t Block<Traits>::get_first_bit_fingerprint_gi(const size_t payload_start_idx, size_t fp_index,
+                                                  XDPType *xdp, BitsetWrapper<FINGERPRINT_SIZE> fp_artificial) {
+        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
+            auto [valid_bits, extra_bits] = payload_list.get_extra_bits_at(payload_start_idx);
+            if (valid_bits) {
+                if (extra_bits % 2 == 0)
+                    return 1;
+                else
+                    return 0;
+            }
+        }
+        auto payload = payload_list.get_payload_at(payload_start_idx);
+        bool bit;
+        {
+            auto li_idx_oracle = payload;
+            std::optional<ENTRY_TYPE> e2 = xdp->performReadTaskIdx(fp_artificial, li_idx_oracle);
+            if (!e2) {
+                throw std::runtime_error("Failed to read from SSDLog");
+            }
+            auto fp2 = Hashing<Traits>::hash_digest(e2->key);
+            auto bit2 = fp2.get(fp_index);
+
+            bit = bit2;
+        }
+//        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
+//            auto extra = fp.range_fast_one_reg(0, fp_index, REGISTER_SIZE);
+//            payload_list.set_extra_bits_at(extra, payload_start_idx, 0);
+//        }
+        return bit ? 0 : 1;
+    }
+
+#endif

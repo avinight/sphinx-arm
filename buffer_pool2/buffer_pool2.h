@@ -33,14 +33,14 @@ public:
         bool reference; // For clock eviction policy
         bool valid;
 
-        Entry() : key(), val(), org_key(), occupied(false), reference(false), valid(true) {}
+        Entry() : key(), org_key(), val(), occupied(false), reference(false), valid(true) {}
         Entry(KEY_TYPE key, ORG_KEY_TYPE org_key, VALUE_TYPE val)
                 : key(key), org_key(org_key), val(val), occupied(true), reference(true), valid(true) {}
     };
 
 
     explicit LinearProbingHashTable(INDEX_TYPE capacity)
-            : capacity_(capacity), size_(0), clock_hand_(0),
+            : size_(0), clock_hand_(0), capacity_(capacity), 
               table_(std::make_unique<Entry[]>(capacity)) {
         num_locks_ = (capacity_ + Traits::LOCK_LENGTH - 1) / Traits::LOCK_LENGTH + 1;
         locks_ = std::make_unique<std::mutex[]>(num_locks_);
@@ -200,7 +200,7 @@ public:
         // Lock both mutexes in a consistent order using std::lock to prevent deadlocks.
         std::unique_lock<std::mutex> lock1(locks_[first_lock_index]);
         std::unique_lock<std::mutex> lock2(locks_[second_lock_index]);
-        auto probe = 0;
+        size_t probe = 0;
         while (true) {
             probe += 1;
             Entry& entry = table_[clock_hand_];
@@ -269,7 +269,7 @@ public:
     }
     size_t getOccupied() const {
         size_t count = 0;
-        for (int i = 0; i < capacity_; i++) {
+        for (size_t i = 0; i < capacity_; i++) {
             count += (table_[i].occupied);
         }
         return count;

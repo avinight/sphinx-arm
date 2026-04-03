@@ -77,14 +77,6 @@ public:
 
 
     void printToFile(const std::vector<std::string>& column_names, const std::string& base_file_name, const std::string& metadata) const {
-        // Generate the timestamp
-        auto now = std::chrono::system_clock::now();
-        auto now_c = std::chrono::system_clock::to_time_t(now);
-
-        // std::ostringstream timestamp_stream;
-        // timestamp_stream << std::put_time(std::localtime(&now_c), "%Y%m%d_%H%M%S");
-        // std::string timestamp = timestamp_stream.str();
-
         // Create the final filename
         std::string file_name = base_file_name + metadata + ".csv";
 

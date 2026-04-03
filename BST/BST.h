@@ -8,7 +8,7 @@
 #include "../config/config.h"
 
 struct Node {
-    int index{};
+    size_t index{};
     std::unique_ptr<Node> left;
     std::unique_ptr<Node> right;
 };

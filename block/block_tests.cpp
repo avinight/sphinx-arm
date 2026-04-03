@@ -58,7 +58,7 @@ TEST_CASE("Block: finding index of the payload correctly") {
             CHECK(next_slot_start == end);
 
             // Validate ten value
-            CHECK(ten == expected_ten[slot_idx]);
+            CHECK(ten == static_cast<size_t>(expected_ten[slot_idx]));
 
             // Additional validation for BST creation
             auto bst = BST<N>(ten, slot_start, 0);
@@ -89,24 +89,26 @@ TEST_CASE("Block: write in block") {
     Block<TestDefaultTraits> block;
     const auto ssdLog = std::make_unique<SSDLog<TestDefaultTraits>>("Block<>test_2.txt", 10);
     SECTION("Test1: simple write") {
-        for (auto i = 0; i < 8; i++) {
+        for (size_t i = 0; i < 8; ++i) {
             const KEY_TYPE key = 0x0000000000000000 + (static_cast<KEY_TYPE>(i) << (8));
             const VALUE_TYPE value = i * 2 + 1;
             PAYLOAD_TYPE pt = ssdLog->write(key, value);
             auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
             auto info = block.write(hash_val, *ssdLog.get(), 6, pt);
+            (void)info;
             CHECK(block.read(hash_val, *ssdLog.get(), 6)->key == key);
         }
     }
 
     SECTION("Test3: simple write - multiple lslots") {
-        for (auto lslot = 0; lslot < 8; lslot++) {
-            for (auto i = 0; i < 4; i++) {
+        for (size_t lslot = 0; lslot < 8; ++lslot) {
+            for (size_t i = 0; i < 4; ++i) {
                 const KEY_TYPE key = (static_cast<KEY_TYPE>(lslot) << (5)) + (static_cast<KEY_TYPE>(i) << (8));
                 const VALUE_TYPE value = i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
                 auto info = block.write(hash_val, *ssdLog.get(), 6, pt);
+                (void)info;
                 CHECK(block.read(hash_val, *ssdLog.get(), 6)->key == key);
             }
         }
@@ -119,12 +121,13 @@ TEST_CASE("Block: write test for fingerprint with specific pattern") {
     SECTION("Test1: simple write") {
         const std::vector<std::string> fps = {"101", "010", "111"};
 
-        for (auto i = 0; i < fps.size(); i++) {
+        for (size_t i = 0; i < fps.size(); ++i) {
             const auto key = static_cast<KEY_TYPE>(getFP(61, 0, 0, 12, fps[i]));
             const VALUE_TYPE value = i * 2 + 1;
             PAYLOAD_TYPE pt = ssdLog->write(key, value);
             auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
             auto info = block.write(hash_val, *ssdLog.get(), 12, pt);
+            (void)info;
             CHECK(block.read(hash_val, *ssdLog.get(), 12)->key == key);
         }
         if (DefaultTraits::NUMBER_EXTRA_BITS) {
@@ -137,20 +140,22 @@ TEST_CASE("Block: write test for fingerprint with specific pattern") {
         const std::vector<std::string> fps = {"101", "010", "111"};
         size_t FP_size = 2 * COUNT_SLOT_BITS;
 
-        for (auto i = 0; i < COUNT_SLOT; i++) {
+        for (size_t i = 0; i < COUNT_SLOT; ++i) {
             const auto key = static_cast<KEY_TYPE>(getFP(i, 0, 0, FP_size, fps[0]));
             const VALUE_TYPE value = i * 2 + 1;
             PAYLOAD_TYPE pt = ssdLog->write(key, value);
             auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
             auto info = block.write(hash_val, *ssdLog.get(), FP_size, pt);
+            (void)info;
             CHECK(block.read(hash_val, *ssdLog.get(), FP_size)->key == key);
         }
-        for (auto j = 0; j < TestDefaultTraits::SAFETY_PAYLOADS; j++) {
+        for (size_t j = 0; j < TestDefaultTraits::SAFETY_PAYLOADS; ++j) {
             const auto key = static_cast<KEY_TYPE>(getFP(j, 0, 0, FP_size, fps[2]));
             const VALUE_TYPE value = j * 2 + 1;
             PAYLOAD_TYPE pt = ssdLog->write(key, value);
             auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
             auto info = block.write(hash_val, *ssdLog.get(), FP_size, pt);
+            (void)info;
             CHECK(info.rs == WriteReturnStatusSuccessful);
             CHECK(block.read(hash_val, *ssdLog.get(), FP_size)->key == key);
         }
@@ -241,21 +246,23 @@ TEST_CASE("Block: simple remove") {
         size_t FP_size = 2 * COUNT_SLOT_BITS;
 
         auto bef = block.bits.getInputString();
-        for (auto blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += 4) {
-            for (auto i = 0; i < fps.size(); i++) {
+        for (size_t blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += 4) {
+            for (size_t i = 0; i < fps.size(); ++i) {
                 const auto key = static_cast<KEY_TYPE>(getFP(blkIdx, 0, 0, FP_size, fps[i]));
                 const VALUE_TYPE value = i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
                 auto info = block.write(hash_val, *ssdLog.get(), FP_size, pt);
+                (void)info;
                 CHECK(block.read(hash_val, *ssdLog.get(), FP_size)->key == key);
             }
         }
-        for (auto blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += 4) {
-            for (auto i = 0; i < fps.size(); i++) {
+        for (size_t blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += 4) {
+            for (size_t i = 0; i < fps.size(); ++i) {
                 const auto key = static_cast<KEY_TYPE>(getFP(blkIdx, 0, 0, FP_size, fps[i]));
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
                 auto info = block.remove(hash_val, *ssdLog.get(), FP_size);
+                (void)info;
                 CHECK(block.get_ten(blkIdx) == fps.size() - i - 1);
             }
             CHECK(block.getLSlotString(*ssdLog.get(), blkIdx).empty());
@@ -267,23 +274,25 @@ TEST_CASE("Block: simple remove") {
         const std::vector<std::string> fps = {"10000", "10001", "10011"};
         size_t FP_size = 2 * COUNT_SLOT_BITS;
 
-        for (auto blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += 4) {
-            for (auto i = 0; i < fps.size(); i++) {
+        for (size_t blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += 4) {
+            for (size_t i = 0; i < fps.size(); ++i) {
                 const auto  key = static_cast<KEY_TYPE>(getFP(blkIdx, 0, 0, FP_size, fps[i]));
                 const VALUE_TYPE value = i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
                 auto info = block.write(hash_val, *ssdLog.get(), FP_size, pt);
+                (void)info;
                 CHECK(block.read(hash_val, *ssdLog.get(), FP_size)->key == key);
             }
         }
-        for (auto blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += COUNT_SLOT / 2 + 1) {
-            for (auto i = 0; i < fps.size(); i++) {
+        for (size_t blkIdx = 0; blkIdx < COUNT_SLOT; blkIdx += COUNT_SLOT / 2 + 1) {
+            for (size_t i = 0; i < fps.size(); ++i) {
                 const auto  key = static_cast<KEY_TYPE>(getFP(blkIdx, 0, 0, FP_size, fps[i]));
                 const VALUE_TYPE value = i * 2 + 1;
                 PAYLOAD_TYPE pt = ssdLog->write(key, value);
                 auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
                 auto info = block.write(hash_val, *ssdLog.get(), FP_size, pt);
+                (void)info;
                 CHECK(block.read(hash_val, *ssdLog.get(), FP_size)->key == key);
             }
         }
@@ -316,7 +325,7 @@ TEST_CASE("Test Dummy") {
         uint64_t a = 1ULL << 31;
         uint64_t b = 1ULL << 31;
 
-        auto c = __builtin_ia32_pext_di(a, b);
+        auto c = zp7_pext_64(a, b);
         std::cout << c << std::endl;
     }
     SECTION("Test1") {
@@ -324,7 +333,7 @@ TEST_CASE("Test Dummy") {
         uint64_t a = 1 << 31;
         uint64_t b = 1 << 31;
 
-        auto c = __builtin_ia32_pext_di(a, b);
+        auto c = zp7_pext_64(a, b);
         std::cout << c << std::endl;
     }
 }

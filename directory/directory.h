@@ -329,14 +329,14 @@ class Directory {
     // In each of these functions we compute the segment index from the key,
     // then choose the worker queue by (segmentIndex % maxThreads).
 
-    bool writeSegmentSingleThread(const KEY_TYPE key, VALUE_TYPE val, SSDLog<Traits>& ssdLog,
+    bool writeSegmentSingleThread(const KEY_TYPE key, [[maybe_unused]] VALUE_TYPE val, SSDLog<Traits>& ssdLog,
                                   const PAYLOAD_TYPE payload) {
         auto fingerprint = Hashing<Traits>::hash_digest(key);
         const auto result = performWriteTask(fingerprint, ssdLog, payload);
         return result;
     }
 #ifdef ENABLE_XDP
-    bool writeSegmentSingleThreadGI(const KEY_TYPE key, VALUE_TYPE val,
+    bool writeSegmentSingleThreadGI(const KEY_TYPE key, [[maybe_unused]] VALUE_TYPE val,
                                   const PAYLOAD_TYPE payload, XDP<TraitsGI, TraitsLI, TraitsLIBuffer> *xdp) {
         auto fingerprint = Hashing<Traits>::hash_digest(key);
         const auto result = performWriteTaskGI(fingerprint, payload, xdp);
@@ -344,7 +344,7 @@ class Directory {
     }
 #endif
 
-    bool updateSegmentSingleThread(const KEY_TYPE key, VALUE_TYPE val, SSDLog<Traits>& ssdLog,
+    bool updateSegmentSingleThread(const KEY_TYPE key, [[maybe_unused]] VALUE_TYPE val, SSDLog<Traits>& ssdLog,
                                   const PAYLOAD_TYPE payload) {
         auto fingerprint = Hashing<Traits>::hash_digest(key);
         const auto result = performWriteTask(fingerprint, ssdLog, payload, true);
@@ -356,13 +356,13 @@ class Directory {
         return result;
     }
 
-    std::future<bool> writeSegment(const KEY_TYPE key, const VALUE_TYPE val, SSDLog<Traits>& ssdLog,
+    std::future<bool> writeSegment(const KEY_TYPE key, [[maybe_unused]] const VALUE_TYPE val, SSDLog<Traits>& ssdLog,
                                    const PAYLOAD_TYPE payload) {
 #ifdef ENABLE_MT
         auto fingerprint = Hashing<Traits>::hash_digest(key);
         size_t segmentIndex = fingerprint.range_fast_one_reg(0, 0, segmentCountLog);
         int threadId = segmentIndex % maxThreads;  // choose the target thread
-        auto writeTask = [this, key, val, &ssdLog, payload]() {
+        auto writeTask = [this, key, &ssdLog, payload]() {
             auto fingerprint = Hashing<Traits>::hash_digest(key);
             return performWriteTask(fingerprint, ssdLog, payload);
         };
@@ -441,7 +441,7 @@ class Directory {
     std::future<bool> readRandom(PAYLOAD_TYPE p, const SSDLog<Traits>& ssdLog) {
 #ifdef ENABLE_MT
         int threadId = p % maxThreads;
-        auto readTask = [this, p, &ssdLog]() {
+        auto readTask = [p, &ssdLog]() {
             ENTRY_TYPE kv;
             auto payload = p;
             return ssdLog.read(payload, kv);

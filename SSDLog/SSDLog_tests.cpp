@@ -34,8 +34,9 @@ TEST_CASE("SSDLog: works correctly for read") {
         auto page = (1 << logNumEntriesPage) + 1;
         ENTRY_TYPE et;
         ssdLog.read(page, et);
-        CHECK(et.key == 258);
-        CHECK(et.value == 516);
+        const auto expected_key = static_cast<int64_t>(numEntriesPerPage + 2);
+        CHECK(et.key == expected_key);
+        CHECK(et.value == expected_key * 2);
     } catch (const std::exception& e) {
         FAIL("Exception: " << e.what());
     }

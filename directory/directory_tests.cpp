@@ -307,7 +307,7 @@ TEST_CASE("DirectoryInsertionToExpandSingleThread") {
 //    dir.print();
 //    dir.print_segs_info();
 //    dir.print();
-    CHECK(dir.get_ten_all() == counter);
+    CHECK(dir.get_ten_all() == static_cast<size_t>(counter));
     // Read operations
     for (size_t i = 0; i < keys.size(); ++i) {
         readFutures.push_back(dir.readSegmentSingleThread(keys[i], *ssdLog.get()));
@@ -498,6 +498,7 @@ TEST_CASE("DirectoryInsertCatchTheBug2") {
     }
     auto seg = dir.getSegmentPtr(0);
     auto blk = seg->getBLock(1);
+    (void)blk;
 //    printBinary(blk->bits.bitset[0]);
 //    printBinary(blk->bits.bitset[1]);
 //    printBinary(blk->bits.bitset[2]);

@@ -104,6 +104,7 @@ void run_multithreaded_test(size_t capacity, size_t num_threads, size_t entries_
     std::atomic<size_t> failed_cnt = 0;
 
     auto insert_entries = [&](size_t thread_id) {
+        (void)thread_id;
         std::random_device rd;
         std::mt19937_64 rng(std::chrono::system_clock::now().time_since_epoch().count());
         std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
@@ -187,6 +188,7 @@ void run_latency_benchmark(size_t capacity) {
     for (size_t i = 0; i < num_read ; ++i) {
         auto start = std::chrono::high_resolution_clock::now();
         auto value = bufferPool.get(keys[i]);
+        (void)value;
         auto end = std::chrono::high_resolution_clock::now();
 
         // assert(value.has_value() && value.value() == static_cast<VALUE_TYPE>(i * 10));
@@ -285,7 +287,7 @@ TEST_CASE("LinearProbingHashTable Basic Operations", "[LinearProbingHashTable]")
         // Verify that all entries are correctly stored and retrievable
         for (size_t i = 0; i < num_entries; ++i) {
             auto value = bufferPool.get(fingerprints[i]);
-            assert(value.has_value() && value.value().second == i);
+            assert(value.has_value() && static_cast<size_t>(value.value().second) == i);
         }
 
         std::cout << "All " << num_entries << " entries were successfully inserted and retrieved.\n";

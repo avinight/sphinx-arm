@@ -1,4 +1,9 @@
-#include <x86intrin.h>  // For _pdep_u64 and _tzcnt_u64
+
+#if defined(__x86_64__) || defined(__i386__)
+#   include <immintrin.h>
+#elif defined(__aarch64__) || defined(__arm__)
+#   include <arm_neon.h>
+#endif
 
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>

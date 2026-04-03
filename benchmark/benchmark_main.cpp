@@ -208,6 +208,7 @@ void verifyFPR(const memento::Memento<Traits::IS_INFINI> &filter, size_t num_key
     }
     auto fpr_actual = static_cast<double>(false_positives) / total_test_size;
     auto lf = get_lf_filter<Traits>(filter, num_keys_inserted);
+    (void)lf;
     std::cout << "FPR: " << fpr << " - FPR actual: " << fpr_actual << std::endl;
     // if (std::abs(fpr - fpr_actual) > 0.01 && std::abs(fpr - fpr_actual) / fpr > 0.1 && lf > 0.9) {
     //     throw std::invalid_argument("Error: FPR not matching");
@@ -261,7 +262,7 @@ void insert_pht(memento::Memento<true>& filter, std::unordered_map<size_t, size_
     for (auto& r : res) {
         DefaultTraits::ENTRY_TYPE entry_type;
         ssdLog.read(r, entry_type);
-        if (entry_type.key != key) {
+        if (entry_type.key != static_cast<decltype(entry_type.key)>(key)) {
             stash_dict[key] = pt;
             stashed = true;
             break;
@@ -277,7 +278,7 @@ void query_pht(memento::Memento<true>& filter, std::unordered_map<size_t, size_t
     if (it != stash_dict.end()) {
         DefaultTraits::ENTRY_TYPE entry_type;
         ssdLog.read(it->second, entry_type);
-        if (entry_type.key != vv) {
+        if (entry_type.key != static_cast<decltype(entry_type.key)>(vv)) {
             readFilter<Traits>(filter, ssdLog, vv);
         }
     } else {
@@ -356,15 +357,18 @@ void Run(
 
         if (Traits::NUMBER_EXTRA_BITS > 1 && i > 2) {
             auto rej_key = get_random_key(1, i - 1);
-            dir.readSegmentSingleThread(rej_key, ssdLog);
+            auto read_res = dir.readSegmentSingleThread(rej_key, ssdLog);
+            (void)read_res;
         }
 
         // queries record
         if (should_sample(i)) {
             auto v = generate_random_keys(1, i, RANDOM_CNT);
             auto start_query = std::chrono::high_resolution_clock::now();
-            for (auto vv : v)
-                dir.readSegmentSingleThread(vv, ssdLog);
+            for (auto vv : v) {
+                auto read_res = dir.readSegmentSingleThread(vv, ssdLog);
+                (void)read_res;
+            }
             auto end_query = std::chrono::high_resolution_clock::now();
             auto du_query = std::chrono::duration_cast<std::chrono::nanoseconds>(end_query - start_query).count() / RANDOM_CNT;
             metrics.record("query_time", du_query);
@@ -376,7 +380,8 @@ void Run(
             std::vector<size_t> res;
             for (auto vv : v) {
                 auto start_query = std::chrono::high_resolution_clock::now();
-                dir.readSegmentSingleThread(vv, ssdLog);
+                auto read_res = dir.readSegmentSingleThread(vv, ssdLog);
+                (void)read_res;
                 auto end_query = std::chrono::high_resolution_clock::now();
                 auto du_query = std::chrono::duration_cast<std::chrono::nanoseconds>(end_query - start_query).count();
                 res.push_back(du_query);

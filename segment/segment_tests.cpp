@@ -112,7 +112,7 @@ TEST_CASE("Segment<TestDefaultTraits>: expand without extension") {
     auto [sg1, sg2] = sg.expand(*ssdLog);
     // sg1->print();
     // sg2->print();
-    for (auto i = 0; i < keys.size(); i++) {
+    for (size_t i = 0; i < keys.size(); ++i) {
         auto key = keys[i];
         auto value = values[i];
 
@@ -159,7 +159,7 @@ TEST_CASE("Segment<TestDefaultTraits>: expand with extension") {
     auto [sg1, sg2] = sg.expand(*ssdLog);
     // sg1->print();
     // sg2->print();
-    for (auto i = 0; i < keys.size(); i++) {
+    for (size_t i = 0; i < keys.size(); ++i) {
         auto key = keys[i];
         auto value = values[i];
         auto h = Hashing<TestDefaultTraits>::hash_digest(key);
@@ -204,7 +204,7 @@ TEST_CASE("Segment<TestDefaultTraits>: expand with extension harder test") {
     auto [sg1, sg2] = sg.expand(*ssdLog);
     // sg1->print();
     // sg2->print();
-    for (auto i = 0; i < keys.size(); i++) {
+    for (size_t i = 0; i < keys.size(); ++i) {
         auto key = keys[i];
         auto value = values[i];
         auto h = Hashing<TestDefaultTraits>::hash_digest(key);
@@ -254,7 +254,7 @@ TEST_CASE("Segment<TestDefaultTraits>: expand with extension much harder test") 
     auto [sg1, sg2] = sg.expand(*ssdLog);
     // sg1->print();
     // sg2->print();
-    for (auto i = 0; i < keys.size(); i++) {
+    for (size_t i = 0; i < keys.size(); ++i) {
         auto key = keys[i];
         auto value = values[i];
         auto h = Hashing<TestDefaultTraits>::hash_digest(key);
@@ -300,7 +300,7 @@ TEST_CASE("Segment<TestDefaultTraits>: extension and delete") {
     // sg.blockList[0].print();
     // sg.printExtension();
 //    sg.print();
-    for (auto i = 0; i < keys.size(); i++) {
+    for (size_t i = 0; i < keys.size(); ++i) {
         auto key = keys[i];
 
         auto h = Hashing<TestDefaultTraits>::hash_digest(key);
