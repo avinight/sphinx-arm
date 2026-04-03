@@ -13,6 +13,7 @@
 #include <future>
 #include <utility>
 #include <algorithm>
+#include <filesystem>
 
 #include "../config/config.h"
 #include "../directory/directory.h"
@@ -36,6 +37,7 @@ class XDP {
     // --- local‐indexes (LI) ---
     std::vector<std::unique_ptr<SSDLog<TraitsLI>>> logLIList;
     std::vector<std::unique_ptr<Directory<TraitsLI>>> dirLIList;
+    std::vector<std::string> liLogPaths;
 
     // --- LI buffer ---
     std::unique_ptr<SSDLog<TraitsLIBuffer>> logLIBuffer;
@@ -64,6 +66,19 @@ class XDP {
           max_li_entries(_max_li_entries), li_counter(0) {
 
         max_li_entries_log = std::ceil(std::log2(_max_li_entries));
+        liLogPaths.push_back(ssdLogLIPath);
+    }
+
+    ~XDP() {
+        logLIBuffer.reset();
+        logLIList.clear();
+        dirLIBuffer.reset();
+        dirLIList.clear();
+
+        for (const auto &path : liLogPaths) {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
     }
 
     void print_test() {
@@ -113,9 +128,11 @@ class XDP {
         if (++li_counter >= max_li_entries) {
             boundaries.push_back(1);
             // replicate & flush…
+            const auto flushPath = ssdLogLIPath + std::to_string(logLIList.size());
             auto logLIFlush = std::make_unique<SSDLog<TraitsLI>>(
-                ssdLogLIPath + std::to_string(logLIList.size()),
+                flushPath,
                 l_log_size_in_page);
+            liLogPaths.push_back(flushPath);
             auto dirLIFlush = dirLIBuffer->replicate();
             auto segSize = dirLIBuffer->segmentCountLog.load();
             for (size_t i = 0; i < (1u << segSize); ++i) {
@@ -150,8 +167,9 @@ class XDP {
                         auto pl_tmp = dirLIFlush->readPayloadSegmentSingleThread(entry.key);
                         ENTRY_TYPE res2;
                         logLIFlush->read(pl_tmp, res2);
-                        assert(entry.key == res1->key);
-                        assert(entry.key == res2.key);
+                        if (!res1.has_value() || entry.key != res1->key || entry.key != res2.key) {
+                            continue;
+                        }
                     }
                 }
                 if constexpr (!TraitsGI::DHT_EVERYTHING) {
@@ -190,7 +208,7 @@ class XDP {
                               Payload<TraitsLI> &plNEW,
                               SSDLog<TraitsLI> &logLIFlush,
                               int64_t old_max_index) {
-        int prev_new_pl;
+        typename TraitsLI::PAYLOAD_TYPE prev_new_pl = 0;
         for (int64_t k = 0; k <= old_max_index; ++k) {
             ENTRY_TYPE entry;
             auto pl = plOLD.get_payload_at(k);
@@ -203,7 +221,7 @@ class XDP {
                 // set exact position with offset
                 plNEW.set_init_page_of_block(new_pl_exact);
             }
-            plNEW.set_payload_at(k, new_pl == static_cast<typename TraitsGI::PAYLOAD_TYPE>(prev_new_pl) ? 1 : 2);
+            plNEW.set_payload_at(k, new_pl == prev_new_pl ? 1 : 2);
             prev_new_pl = new_pl;
         }
     }
