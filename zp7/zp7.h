@@ -29,6 +29,19 @@
 #   include <arm_neon.h>
 #endif
 
+// Auto-enable optional fast paths when the compiler target supports them.
+#if !defined(HAS_CLMUL) && (defined(__PCLMUL__) || defined(__PCLMULQDQ__))
+#   define HAS_CLMUL
+#endif
+
+#if !defined(HAS_BZHI) && defined(__BMI2__)
+#   define HAS_BZHI
+#endif
+
+#if !defined(HAS_POPCNT) && defined(__POPCNT__)
+#   define HAS_POPCNT
+#endif
+
 // ZP7: branchless PEXT/PDEP replacement code for non-Intel processors
 //
 // The PEXT/PDEP instructions are pretty cool, with various (usually arcane)
@@ -121,13 +134,12 @@ uint64_t popcnt_64(uint64_t x) {
 // POPCNT polyfill. See this page for information about the algorithm:
 // https://www.chessprogramming.org/Population_Count#SWAR-Popcount
 uint64_t popcnt_64(uint64_t x) {
-    const uint64_t m_1 = 0x5555555555555555LLU;
-    const uint64_t m_2 = 0x3333333333333333LLU;
-    const uint64_t m_4 = 0x0f0f0f0f0f0f0f0fLLU;
-    x = x - ((x >> 1) & m_1);
-    x = (x & m_2) + ((x >> 2) & m_2);
-    x = (x + (x >> 4)) & m_4;
-    return (x * 0x0101010101010101LLU) >> 56;
+    // Match the SWAR form used in bitset_wrapper.h
+    constexpr uint64_t L8 = 0x0101010101010101ULL;
+    uint64_t s = x - ((x & 0xAAAAAAAAAAAAAAAAULL) >> 1);
+    s = (s & 0x3333333333333333ULL) + ((s >> 2) & 0x3333333333333333ULL);
+    s = ((s + (s >> 4)) & 0x0F0F0F0F0F0F0F0FULL) * L8;
+    return s >> 56;
 }
 #endif
 #endif
@@ -226,8 +238,10 @@ uint64_t zp7_pext_64(uint64_t a, uint64_t mask) {
 // PDEP
 
 uint64_t zp7_pdep_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
-#ifdef HAS_POPCNT
-    uint64_t popcnt = _popcnt64(masks->mask);
+#if defined(__GNUC__) || defined(__clang__)
+    uint64_t popcnt = static_cast<uint64_t>(__builtin_popcountll(masks->mask));
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+    uint64_t popcnt = static_cast<uint64_t>(__popcnt64(masks->mask));
 #else
     uint64_t popcnt = popcnt_64(masks->mask);
 #endif

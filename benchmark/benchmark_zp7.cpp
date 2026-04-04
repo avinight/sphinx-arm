@@ -1,138 +1,153 @@
-#include <iostream>
 #include <chrono>
+#include <cstdint>
+#include <iostream>
 #include <random>
 #include <vector>
-#include <arm_neon.h>
 
-#define N_BITS (6)
+#include "../bitset_wrapper/bitset_wrapper.h"
+#include "../zp7/zp7.h"
 
-struct zp7_masks_64_t {
-    uint64_t mask;
-    uint64_t ppp_bit[N_BITS];
-};
+#if defined(__x86_64__) || defined(__i386__)
+#include <immintrin.h>
+#if defined(__BMI2__)
+#define HAS_BMI2 1
+#else
+#define HAS_BMI2 0
+#endif
+#else
+#define HAS_BMI2 0
+#endif
 
-// =====================================================================
-// 1. SCALAR FALLBACK IMPLEMENTATION (No SIMD)
-// =====================================================================
-inline uint64_t prefix_sum(uint64_t x) {
-    x ^= x << 1;  x ^= x << 2;  x ^= x << 4;
-    x ^= x << 8;  x ^= x << 16; x ^= x << 32;
-    return x;
-}
-
-zp7_masks_64_t zp7_ppp_64_scalar(uint64_t mask) {
-    zp7_masks_64_t r; r.mask = mask; mask = ~mask;
-    for (int i = 0; i < N_BITS - 1; i++) {
-        uint64_t bit = prefix_sum(mask << 1);
-        r.ppp_bit[i] = bit;
-        mask &= bit;
+template <typename Fn>
+static std::pair<double, uint64_t> run_bench(const std::vector<uint64_t> &data,
+                                             const std::vector<uint64_t> &masks,
+                                             Fn fn) {
+    uint64_t checksum = 0;
+    const auto start = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < data.size(); ++i) {
+        checksum ^= fn(data[i], masks[i]);
     }
-    r.ppp_bit[N_BITS - 1] = -mask << 1;
-    return r;
+    const auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> elapsed = end - start;
+    return {elapsed.count(), checksum};
 }
 
-uint64_t zp7_pdep_64_scalar(uint64_t a, uint64_t mask) {
-    zp7_masks_64_t masks = zp7_ppp_64_scalar(mask);
-    
-    // Scalar POPCNT
-    const uint64_t m_1 = 0x5555555555555555LLU;
-    const uint64_t m_2 = 0x3333333333333333LLU;
-    const uint64_t m_4 = 0x0f0f0f0f0f0f0f0fLLU;
-    uint64_t x = masks.mask;
-    x = x - ((x >> 1) & m_1);
-    x = (x & m_2) + ((x >> 2) & m_2);
-    x = (x + (x >> 4)) & m_4;
-    uint64_t popcnt = (x * 0x0101010101010101LLU) >> 56;
-
-    // Portable Workaround BZHI
-    uint64_t pop_mask = (1ULL << popcnt) & ~(popcnt >> 6);
-    a &= pop_mask - 1;
-
-    for (int i = N_BITS - 1; i >= 0; i--) {
-        uint64_t shift = 1 << i;
-        uint64_t bit = masks.ppp_bit[i] >> shift;
-        a = (a & ~bit) + ((a & bit) << shift);
+template <typename Fn>
+static std::pair<double, uint64_t> run_select_bench(const std::vector<uint64_t> &blocks,
+                                                    const std::vector<int> &ks,
+                                                    Fn fn) {
+    uint64_t checksum = 0;
+    const auto start = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        checksum ^= fn(blocks[i], ks[i], i);
     }
-    return a;
+    const auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> elapsed = end - start;
+    return {elapsed.count(), checksum};
 }
 
-// =====================================================================
-// 2. ARM NEON OPTIMIZED IMPLEMENTATION
-// =====================================================================
-zp7_masks_64_t zp7_ppp_64_neon(uint64_t mask) {
-    zp7_masks_64_t r; r.mask = mask; mask = ~mask;
-    uint64_t m = mask;
-    uint64_t neg_2 = -2ULL;
-
-    for (int i = 0; i < N_BITS - 1; i++) {
-        poly128_t p_128 = vmull_p64((poly64_t)m, (poly64_t)neg_2);
-        uint64_t bit = vgetq_lane_u64(vreinterpretq_u64_p128(p_128), 0);
-        r.ppp_bit[i] = bit;
-        m &= bit;
-    }
-    r.ppp_bit[N_BITS - 1] = -m << 1;
-    return r;
-}
-
-uint64_t zp7_pdep_64_neon(uint64_t a, uint64_t mask) {
-    zp7_masks_64_t masks = zp7_ppp_64_neon(mask);
-    
-    // NEON POPCNT
-    uint8x8_t v = vcnt_u8(vcreate_u8(masks.mask));
-    uint64_t popcnt = vaddv_u8(v);
-
-    // ARM CSEL Branchless BZHI
-    a &= (popcnt == 64) ? ~0ULL : ((1ULL << popcnt) - 1);
-
-    for (int i = N_BITS - 1; i >= 0; i--) {
-        uint64_t shift = 1 << i;
-        uint64_t bit = masks.ppp_bit[i] >> shift;
-        a = (a & ~bit) + ((a & bit) << shift);
-    }
-    return a;
-}
-
-// =====================================================================
-// 3. BENCHMARK HARNESS
-// =====================================================================
 int main() {
-    const size_t ITERATIONS = 10000000;
+    constexpr size_t ITERATIONS = 10'000'000;
     std::vector<uint64_t> data(ITERATIONS);
     std::vector<uint64_t> masks(ITERATIONS);
+    std::vector<uint64_t> blocks(ITERATIONS);
+    std::vector<int> ks(ITERATIONS);
+    std::vector<zp7_masks_64_t> precomputed_ppp(ITERATIONS);
 
-    // Generate random data to prevent branch prediction from cheating
     std::mt19937_64 gen(std::random_device{}());
-    for (size_t i = 0; i < ITERATIONS; i++) {
+    for (size_t i = 0; i < ITERATIONS; ++i) {
         data[i] = gen();
         masks[i] = gen();
+
+        uint64_t block = gen();
+        block |= 1ULL;  // guarantee at least one set bit
+        blocks[i] = block;
+
+        const int pop = __builtin_popcountll(block);
+        ks[i] = static_cast<int>(gen() % static_cast<uint64_t>(pop));
+        precomputed_ppp[i] = zp7_ppp_64(block);
     }
 
-    // Benchmark SCALAR
-    uint64_t scalar_accumulator = 0;
-    auto start_scalar = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < ITERATIONS; i++) {
-        scalar_accumulator ^= zp7_pdep_64_scalar(data[i], masks[i]);
-    }
-    auto end_scalar = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> scalar_ms = end_scalar - start_scalar;
+    const auto [pdep_zp7_ms, pdep_zp7_ck] = run_bench(data, masks, [](uint64_t a, uint64_t m) {
+        return zp7_pdep_64(a, m);
+    });
+    const auto [pext_zp7_ms, pext_zp7_ck] = run_bench(data, masks, [](uint64_t a, uint64_t m) {
+        return zp7_pext_64(a, m);
+    });
 
-    // Benchmark NEON
-    uint64_t neon_accumulator = 0;
-    auto start_neon = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < ITERATIONS; i++) {
-        neon_accumulator ^= zp7_pdep_64_neon(data[i], masks[i]);
-    }
-    auto end_neon = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> neon_ms = end_neon - start_neon;
+    std::cout << "--- ZP7 PDEP/PEXT Benchmark (10 Million Iterations) ---\n";
+    std::cout << "ZP7 PDEP Time: " << pdep_zp7_ms << " ms\n";
+    std::cout << "ZP7 PEXT Time: " << pext_zp7_ms << " ms\n";
 
-    // Output Results
-    std::cout << "--- PDEP Benchmark (10 Million Iterations) ---\n";
-    std::cout << "Scalar Fallback Time: " << scalar_ms.count() << " ms\n";
-    std::cout << "NEON Optimized Time:  " << neon_ms.count() << " ms\n";
-    std::cout << "Speedup:              " << scalar_ms.count() / neon_ms.count() << "x\n";
-    
-    // Print accumulators to ensure the compiler doesn't optimize the loops away
-    std::cout << "(Checksums: " << scalar_accumulator << ", " << neon_accumulator << ")\n";
+#if HAS_BMI2
+    const auto [pdep_native_ms, pdep_native_ck] = run_bench(data, masks, [](uint64_t a, uint64_t m) {
+        return _pdep_u64(a, m);
+    });
+    const auto [pext_native_ms, pext_native_ck] = run_bench(data, masks, [](uint64_t a, uint64_t m) {
+        return _pext_u64(a, m);
+    });
+
+    std::cout << "Native PDEP (_pdep_u64) Time: " << pdep_native_ms << " ms\n";
+    std::cout << "Native PEXT (_pext_u64) Time: " << pext_native_ms << " ms\n";
+    std::cout << "PDEP speedup (ZP7/native): " << (pdep_zp7_ms / pdep_native_ms) << "x\n";
+    std::cout << "PEXT speedup (ZP7/native): " << (pext_zp7_ms / pext_native_ms) << "x\n";
+    std::cout << "Checksums PDEP (ZP7/native): " << pdep_zp7_ck << " / " << pdep_native_ck << "\n";
+    std::cout << "Checksums PEXT (ZP7/native): " << pext_zp7_ck << " / " << pext_native_ck << "\n";
+#else
+    std::cout << "Native BMI2 comparisons are disabled on this architecture/build (e.g., ARM/no __BMI2__).\n";
+    std::cout << "Checksums PDEP (ZP7): " << pdep_zp7_ck << "\n";
+    std::cout << "Checksums PEXT (ZP7): " << pext_zp7_ck << "\n";
+#endif
+
+    std::cout << "\n--- Select Benchmark (k-th set bit in 64-bit block) ---\n";
+
+    const auto [sel_zp7_ms, sel_zp7_ck] = run_select_bench(blocks, ks, [](uint64_t block, int k, size_t) {
+        const uint64_t nth_bit_mask = 1ULL << k;
+        const uint64_t deposited = zp7_pdep_64(nth_bit_mask, block);
+        return static_cast<uint64_t>(__builtin_ctzll(deposited));
+    });
+    const auto [sel_zp7_cached_ms, sel_zp7_cached_ck] = run_select_bench(blocks, ks, [&](uint64_t, int k, size_t i) {
+        const uint64_t nth_bit_mask = 1ULL << k;
+        const uint64_t deposited = zp7_pdep_pre_64(nth_bit_mask, &precomputed_ppp[i]);
+        return static_cast<uint64_t>(__builtin_ctzll(deposited));
+    });
+    const auto [sel_swar_lut_ms, sel_swar_lut_ck] = run_select_bench(blocks, ks, [](uint64_t block, int k, size_t) {
+        return _select64(block, k);
+    });
+    const auto [sel_swar_no_lut_ms, sel_swar_no_lut_ck] = run_select_bench(blocks, ks, [](uint64_t block, int k, size_t) {
+        return _select_64(block, k);
+    });
+
+    std::cout << "ZP7-based select time:        " << sel_zp7_ms << " ms\n";
+    std::cout << "ZP7 select (cached PPP):      " << sel_zp7_cached_ms << " ms\n";
+    std::cout << "SWAR select (with LUT) time:  " << sel_swar_lut_ms << " ms\n";
+    std::cout << "SWAR select (no LUT) time:    " << sel_swar_no_lut_ms << " ms\n";
+
+#if HAS_BMI2
+    const auto [sel_native_ms, sel_native_ck] = run_select_bench(blocks, ks, [](uint64_t block, int k, size_t) {
+        const uint64_t nth_bit_mask = 1ULL << k;
+        const uint64_t deposited = _pdep_u64(nth_bit_mask, block);
+        return static_cast<uint64_t>(__builtin_ctzll(deposited));
+    });
+
+    std::cout << "Native BMI2 select time:      " << sel_native_ms << " ms\n";
+    std::cout << "Speedup (ZP7/SWAR LUT):       " << (sel_zp7_ms / sel_swar_lut_ms) << "x\n";
+    std::cout << "Speedup (ZP7 cached/SWAR LUT):" << (sel_zp7_cached_ms / sel_swar_lut_ms) << "x\n";
+    std::cout << "Speedup (ZP7/SWAR no LUT):    " << (sel_zp7_ms / sel_swar_no_lut_ms) << "x\n";
+    std::cout << "Speedup (ZP7 cached/native):  " << (sel_zp7_cached_ms / sel_native_ms) << "x\n";
+    std::cout << "Speedup (SWAR LUT/native):    " << (sel_swar_lut_ms / sel_native_ms) << "x\n";
+    std::cout << "Speedup (SWAR no LUT/native): " << (sel_swar_no_lut_ms / sel_native_ms) << "x\n";
+    std::cout << "Checksums select (ZP7/ZP7cached/native/LUT/noLUT): "
+              << sel_zp7_ck << " / " << sel_zp7_cached_ck << " / " << sel_native_ck << " / "
+              << sel_swar_lut_ck << " / " << sel_swar_no_lut_ck << "\n";
+#else
+    std::cout << "Native BMI2 select comparison skipped on this architecture/build.\n";
+    std::cout << "Speedup (ZP7/SWAR LUT):       " << (sel_zp7_ms / sel_swar_lut_ms) << "x\n";
+    std::cout << "Speedup (ZP7 cached/SWAR LUT):" << (sel_zp7_cached_ms / sel_swar_lut_ms) << "x\n";
+    std::cout << "Speedup (ZP7/SWAR no LUT):    " << (sel_zp7_ms / sel_swar_no_lut_ms) << "x\n";
+    std::cout << "Checksums select (ZP7/ZP7cached/LUT/noLUT): " << sel_zp7_ck << " / "
+              << sel_zp7_cached_ck << " / " << sel_swar_lut_ck << " / " << sel_swar_no_lut_ck << "\n";
+#endif
 
     return 0;
 }

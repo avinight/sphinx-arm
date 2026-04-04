@@ -1,18 +1,18 @@
 {
     "configurations": [
         {
-            "name": "Mac",
+            "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/clang",
-            "cStandard": "c23",
-            "cppStandard": "c++26",
-            "intelliSenseMode": "macos-clang-arm64",
-            "compileCommands": [
-                "${workspaceFolder}/build/compile_commands.json"
-            ]
+            "compilerPath": "/usr/bin/gcc",
+            "compilerArgs": [
+                "-mbmi2"
+            ],
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
         }
     ],
     "version": 4

@@ -14,6 +14,15 @@ add_executable(benchmark_xdp benchmark_xdp.cpp ${SOURCE_FILES})
 add_executable(benchmark_load_factor_query_insert benchmark_load_factor_query_insert.cpp ${SOURCE_FILES})
 add_executable(benchmark_extra_bits benchmark_extra_bits.cpp ${SOURCE_FILES})
 add_executable(benchmark_tail benchmark_tail.cpp ${SOURCE_FILES})
+add_executable(benchmark_zp7 benchmark_zp7.cpp)
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|i.86")
+                target_compile_options(benchmark_zp7 PRIVATE -march=native -mbmi2)
+        elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+                target_compile_options(benchmark_zp7 PRIVATE -march=native)
+        endif()
+endif()
 
 target_link_libraries(benchmark_read_latency2
         PRIVATE
