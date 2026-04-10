@@ -1,7 +1,10 @@
 #include <thread>
+#include <vector>
+#include <algorithm>
 #include "../block/block.h"
 #include "../config/config.h"
 #include "../extension_block/extension_block.h"
+#include "../zp7/simd_pdep_pext.h"
 
 #define CALCULATE_NEW_BLOCK_IDX(oldBlkIdx, oldLslotIdx) \
     ((oldBlkIdx / 2) + (COUNT_SLOT / 2) * (oldLslotIdx % 2))
@@ -264,6 +267,152 @@ class Segment {
         }
         return res;
     }
+
+    // Two-phase single read: delegates to Block::read_prepared.
+    // Use this to validate that prepare_slot + resolve_offset matches read().
+    std::optional<ENTRY_TYPE> read_prepared(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint, const SSDLog<Traits> &ssdLog) const {
+        const size_t blkIdx = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
+        auto blk = &blockList[blkIdx];
+        const BlockInfo blkInfo = blk->get_block_info();
+        const size_t lslotIdx = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
+        const auto exBlkIdx = ExtensionBlock<Traits>::CALCULATE_EXTENDED_BLOCK_INDEX(blkIdx, lslotIdx);
+        const auto exBlk = &extensionBlockList[exBlkIdx];
+
+        // For now, only use the two-phase path for non-extended, READ_OFF_STRATEGY==0 queries.
+        // Extended slots and DHT paths fall back to the original read().
+        if constexpr (!Traits::DHT_EVERYTHING) {
+            if (blkInfo.firstExtendedLSlot > lslotIdx && Traits::READ_OFF_STRATEGY == 0) {
+                return blk->read_prepared(fingerprint, ssdLog, FP_index);
+            }
+        }
+        // Fallback to original read for extension blocks, DHT, etc.
+        return read(fingerprint, ssdLog);
+    }
+
+    // Batch read with software prefetching.
+    // Processes `count` fingerprints, writing results into `results`.
+    // Uses look-ahead prefetching to hide cache-miss latency for block access.
+    void read_batch(BitsetWrapper<FINGERPRINT_SIZE> *fingerprints,
+                    std::optional<ENTRY_TYPE> *results,
+                    size_t count,
+                    const SSDLog<Traits> &ssdLog) const {
+        constexpr size_t PREFETCH_AHEAD = 4;
+
+        // Issue initial prefetches
+        for (size_t i = 0; i < std::min(count, PREFETCH_AHEAD); i++) {
+            size_t blkIdx = fingerprints[i].range_fast_one_reg(
+                0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
+            __builtin_prefetch(&blockList[blkIdx], 0 /* read */, 3 /* all cache levels */);
+        }
+
+        for (size_t i = 0; i < count; i++) {
+            // Prefetch the block for a future query
+            if (i + PREFETCH_AHEAD < count) {
+                size_t futureBlkIdx = fingerprints[i + PREFETCH_AHEAD].range_fast_one_reg(
+                    0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
+                __builtin_prefetch(&blockList[futureBlkIdx], 0, 3);
+            }
+
+            // Process current query using the two-phase path
+            results[i] = read_prepared(fingerprints[i], ssdLog);
+        }
+    }
+
+    // Experimental: Batched read with SIMD PEXT (from Wojciech Muła's algorithm)
+    // Groups queries that hit the same slot so they share a PEXT mask, then uses
+    // AVX2 to compute PEXT across 4 fingerprints simultaneously.
+    void read_batch_pext(BitsetWrapper<FINGERPRINT_SIZE> *fingerprints,
+                         std::optional<ENTRY_TYPE> *results,
+                         size_t count,
+                         const SSDLog<Traits> &ssdLog) const {
+        struct QueryInfo {
+            size_t original_idx;
+            size_t blkIdx;
+            size_t slotIdx;
+            SlotContext ctx;
+        };
+        std::vector<QueryInfo> infos(count);
+
+        // Phase 1: prepare all slot contexts
+        for (size_t i = 0; i < count; i++) {
+            infos[i].original_idx = i;
+            infos[i].blkIdx = fingerprints[i].range_fast_one_reg(
+                0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
+            infos[i].slotIdx = fingerprints[i].range_fast_one_reg(
+                0, FP_index - COUNT_SLOT_BITS, FP_index);
+
+            auto blk = &blockList[infos[i].blkIdx];
+            const BlockInfo blkInfo = blk->get_block_info();
+            
+            // Only prepare standard block slots for this demo
+            if constexpr (!Traits::DHT_EVERYTHING) {
+                if (blkInfo.firstExtendedLSlot > infos[i].slotIdx && Traits::READ_OFF_STRATEGY == 0) {
+                    infos[i].ctx = blk->prepare_slot(infos[i].slotIdx, FP_index);
+                } else {
+                    infos[i].ctx.use_ht = false; // Force fallback
+                }
+            } else {
+                infos[i].ctx.use_ht = false;
+            }
+        }
+
+        // Group by block, slot, and mask to batch compatible PEXTs
+        std::sort(infos.begin(), infos.end(), [](const QueryInfo& a, const QueryInfo& b) {
+            if (a.blkIdx != b.blkIdx) return a.blkIdx < b.blkIdx;
+            if (a.slotIdx != b.slotIdx) return a.slotIdx < b.slotIdx;
+            return a.ctx.pext_mask < b.ctx.pext_mask;
+        });
+
+        // Phase 2: process grouped queries
+        size_t i = 0;
+        while (i < count) {
+            size_t group_start = i;
+            while (i < count && 
+                   infos[i].blkIdx == infos[group_start].blkIdx &&
+                   infos[i].slotIdx == infos[group_start].slotIdx &&
+                   infos[i].ctx.use_ht &&
+                   infos[i].ctx.pext_mask == infos[group_start].ctx.pext_mask) {
+                i++;
+            }
+            size_t group_size = i - group_start;
+
+            if (group_size > 1 && infos[group_start].ctx.use_ht && 
+                !infos[group_start].ctx.slot_occupied && !infos[group_start].ctx.ten_one) {
+                
+#if HAS_SIMD_PDEP_PEXT
+                // BATCHED SIMD PEXT PATH
+                std::vector<uint64_t> data_words(group_size);
+                std::vector<uint64_t> pext_out(group_size);
+                
+                for (size_t g = 0; g < group_size; g++) {
+                    data_words[g] = fingerprints[infos[group_start + g].original_idx].bitset[0];
+                }
+                
+                simd_utils::simd_pext_u64_shared_mask<64, true>(
+                    data_words.data(), infos[group_start].ctx.pext_mask, pext_out.data(), group_size);
+                
+                for (size_t g = 0; g < group_size; g++) {
+                    const auto &info = infos[group_start + g];
+                    size_t low_bit = pext_out[g] * 3;
+                    size_t offset = (info.ctx.indices_lookup >> low_bit) & 0b111;
+                    
+                    const size_t payload_index = info.ctx.payload_base + offset;
+                    auto payload = blockList[info.blkIdx].payload_list[payload_index];
+                    ENTRY_TYPE kv;
+                    ssdLog.read(payload, kv);
+                    results[info.original_idx] = kv;
+                }
+                continue;
+#endif
+            }
+            
+            // Sequential fallback path
+            for (size_t g = group_start; g < i; g++) {
+                results[infos[g].original_idx] = read_prepared(fingerprints[infos[g].original_idx], ssdLog);
+            }
+        }
+    }
+
     size_t read_payload(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint) const {
         const size_t blkIdx = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
         auto blk = &blockList[blkIdx];

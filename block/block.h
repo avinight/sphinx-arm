@@ -42,6 +42,21 @@ struct BlockInfo {
     uint8_t  firstExtendedLSlot{COUNT_SLOT}, remainingBits{64}, remainingPayload{UINT8_MAX};
 };
 
+// Context for two-phase slot resolution.
+// Phase 1 (prepare_slot) computes everything up to the PEXT call.
+// Phase 2 (resolve_offset) performs the PEXT (or trie-walk fallback) to get the offset.
+// Separating these phases enables batching PEXT calls across queries that share a mask.
+struct SlotContext {
+    size_t payload_base{0};        // index of the first payload entry for this slot
+    size_t total_ten{0};           // number of entries in this slot
+    size_t lslot_start_pos{0};     // bit position where the trie encoding starts (for trie-walk fallback)
+    uint64_t pext_mask{0};         // node.value << FP_index  — the PEXT mask (shared across queries in same slot)
+    uint32_t indices_lookup{0};    // node.indices — precomputed offset lookup table
+    bool use_ht{false};            // true if ht1 matched the trie signature
+    bool slot_occupied{false};     // true if the slot has at least one entry
+    bool ten_one{false};           // true if exactly one entry (offset is trivially 0)
+};
+
 
 enum WriteReturnStatus {
     WriteReturnStatusSuccessful,
@@ -251,6 +266,116 @@ class Block {
             }
         }
         return std::make_pair(prev_ten_end + 1, ret);
+    }
+
+    // ----- Two-phase slot resolution for batch-friendly reads -----
+
+    // Phase 1: Compute everything needed for the slot EXCEPT the PEXT / trie-walk.
+    // This is independent of the queried fingerprint (only depends on the block state
+    // and the slot_index derived from the fingerprint).
+    SlotContext prepare_slot(size_t slot_index, size_t FP_index) const {
+        SlotContext ctx{};
+
+        if (!bits.get(slot_index)) {
+            // Slot is empty — compute payload_base for the empty-slot case
+            auto first_one = bits.get_first_one_before_slow(slot_index);
+            size_t at_least_one_till_slot = bits.rank(first_one + 1);
+            if (at_least_one_till_slot)
+                ctx.payload_base = static_cast<size_t>(bits.select(at_least_one_till_slot, COUNT_SLOT / REGISTER_SIZE) + 1);
+            else
+                ctx.payload_base = 0;
+            return ctx;
+        }
+
+        ctx.slot_occupied = true;
+        size_t at_least_one_till_slot = bits.rank(slot_index);
+        int prev_ten_end = at_least_one_till_slot
+            ? static_cast<int>(bits.select(at_least_one_till_slot, COUNT_SLOT / REGISTER_SIZE))
+            : -1;
+        const size_t ten_end = bits.select(at_least_one_till_slot + 1, COUNT_SLOT / REGISTER_SIZE);
+        ctx.payload_base = static_cast<size_t>(prev_ten_end + 1);
+        ctx.total_ten = static_cast<size_t>(static_cast<int>(ten_end) - prev_ten_end);
+
+        if (ctx.total_ten == 1) {
+            ctx.ten_one = true;
+            return ctx;
+        }
+
+        // Compute the trie signature and look up in ht1
+        const size_t lslot_start =
+            (bits.rank(REGISTER_SIZE) << 1) +
+            ((prev_ten_end + 1 - static_cast<int>(at_least_one_till_slot)) << 1);
+        int ten_left = static_cast<int>(ctx.total_ten);
+        const auto lslot_start_index_pair = bits.select_two(lslot_start, lslot_start + (ten_left * 2 - 3));
+        ctx.lslot_start_pos = lslot_start_index_pair.first + 1;
+
+        const auto signature = bits.range_fast_2(lslot_start_index_pair.first + 1, lslot_start_index_pair.second + 1);
+        const auto hash_val = ht1.hash_function(static_cast<uint16_t>(signature));
+        const auto node = ht1.table[hash_val];
+
+        if (static_cast<std::uint64_t>(node.key) == signature) {
+            ctx.use_ht = true;
+            ctx.pext_mask = static_cast<uint64_t>(node.value) << FP_index;
+            ctx.indices_lookup = node.indices;
+        }
+        // else: use_ht stays false, caller must trie-walk via resolve_offset
+
+        return ctx;
+    }
+
+    // Phase 2: Given a prepared SlotContext, resolve the offset within the slot
+    // for a specific fingerprint.  This is where the PEXT happens.
+    size_t resolve_offset(const SlotContext &ctx,
+                          BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                          size_t FP_index) {
+        if (!ctx.slot_occupied || ctx.ten_one)
+            return 0;
+
+        if (ctx.use_ht) {
+            // ---- THE PEXT CALL ----
+            // When batching, this is the operation that can be replaced with
+            // a SIMD pass over multiple fingerprints sharing the same ctx.pext_mask.
+            const auto important_bits = static_cast<uint64_t>(
+                zp7_pext_64(fingerprint.bitset[0], ctx.pext_mask));
+            const auto low_bit = important_bits * 3;
+            return (ctx.indices_lookup >> low_bit) & (0b111);
+        }
+
+        // Fallback: trie walk (same as the else branch in get_index)
+        int ten_left = static_cast<int>(ctx.total_ten);
+        auto new_total_ten = ctx.total_ten;
+        size_t lslot_idx = ctx.lslot_start_pos;
+        return walk_over_trie_payload(lslot_idx, -1, ten_left, fingerprint,
+                                      FP_index, new_total_ten);
+    }
+
+    // Combined two-phase read: equivalent to read() but using prepare_slot + resolve_offset.
+    // Useful for validating that the two-phase decomposition produces identical results.
+    std::optional<ENTRY_TYPE> read_prepared(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                                            const SSDLog<Traits> &ssdLog,
+                                            size_t FP_index) {
+        const auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
+        SlotContext ctx = prepare_slot(slot_index, FP_index);
+        size_t offset = resolve_offset(ctx, fingerprint, FP_index);
+        const size_t payload_index = ctx.payload_base + offset;
+
+        if (static_cast<int64_t>(payload_index) > get_max_index())
+            return std::nullopt;
+
+        auto payload = payload_list[payload_index];
+        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
+            auto res = payload_list.get_extra_bits_at(payload_index);
+            auto chunked_fp = fingerprint.range_fast_one_reg(0, FP_index, FP_index + res.first);
+            if (chunked_fp != res.second)
+                return std::nullopt;
+        }
+        ENTRY_TYPE kv;
+        ssdLog.read(payload, kv);
+        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
+            auto new_fp = Hashing<Traits>::hash_digest(kv.key);
+            payload_list.set_extra_bits_at(new_fp.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_index, 0);
+        }
+        return kv;
     }
     std::pair<size_t, size_t> get_index_dht(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint, size_t FP_index) {
         const auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
