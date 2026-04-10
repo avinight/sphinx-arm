@@ -377,7 +377,7 @@ class Segment {
             size_t group_size = i - group_start;
 
             if (group_size > 1 && infos[group_start].ctx.use_ht && 
-                !infos[group_start].ctx.slot_occupied && !infos[group_start].ctx.ten_one) {
+                infos[group_start].ctx.slot_occupied && !infos[group_start].ctx.ten_one) {
                 
 #if HAS_SIMD_PDEP_PEXT
                 // BATCHED SIMD PEXT PATH

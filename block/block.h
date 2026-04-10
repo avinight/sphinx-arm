@@ -21,6 +21,7 @@
 #include "../hashtable/hashtable.h"
 #include "../payload/payload.h"
 #include "../zp7/zp7.h"
+#include "../zp7/simd_pdep_pext.h"
 
 #ifdef ENABLE_XDP
 template <
@@ -332,16 +333,36 @@ class Block {
             return 0;
 
         if (ctx.use_ht) {
-            // ---- THE PEXT CALL ----
-            // When batching, this is the operation that can be replaced with
-            // a SIMD pass over multiple fingerprints sharing the same ctx.pext_mask.
+            uint64_t pext_out = 0;
+            simd_utils::simd_pext_u64_shared_mask<64, true>(
+                &fingerprint.bitset[0], ctx.pext_mask, &pext_out, 1);
+            const auto important_bits = static_cast<uint64_t>(pext_out);
+            const auto low_bit = important_bits * 3;
+            return (ctx.indices_lookup >> low_bit) & (0b111);
+        }
+
+        // Fallback: trie walk (same as the else branch in get_index)
+        int ten_left = static_cast<int>(ctx.total_ten);
+        auto new_total_ten = ctx.total_ten;
+        size_t lslot_idx = ctx.lslot_start_pos;
+        return walk_over_trie_payload(lslot_idx, -1, ten_left, fingerprint,
+                                      FP_index, new_total_ten);
+    }
+
+    // Scalar zp7-only variant for benchmarking (bypasses SIMD PEXT path).
+    size_t resolve_offset_zp7(const SlotContext &ctx,
+                              BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
+                              size_t FP_index) {
+        if (!ctx.slot_occupied || ctx.ten_one)
+            return 0;
+
+        if (ctx.use_ht) {
             const auto important_bits = static_cast<uint64_t>(
                 zp7_pext_64(fingerprint.bitset[0], ctx.pext_mask));
             const auto low_bit = important_bits * 3;
             return (ctx.indices_lookup >> low_bit) & (0b111);
         }
 
-        // Fallback: trie walk (same as the else branch in get_index)
         int ten_left = static_cast<int>(ctx.total_ten);
         auto new_total_ten = ctx.total_ten;
         size_t lslot_idx = ctx.lslot_start_pos;

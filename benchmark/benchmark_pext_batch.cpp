@@ -5,34 +5,30 @@
 #include <random>
 #include <numeric>
 
+#include "../hashtable/hashtable.h"
 #include "../segment/segment.h"
 #include "../fingerprint_gen_helper/fingerprint_gen_helper.h"
 #include "../config/config.h"
 
 int main() {
+    generate_hashtable(ht1, signatures_h1, important_bits_h1, indices_h1, arr_h1);
+    
     constexpr size_t FP_index = 12;
     Segment<TestDefaultTraits> sg(FP_index);
     const auto ssdLog = std::make_unique<SSDLog<TestDefaultTraits>>("segment_bench_pext.txt", 100);
 
-    const std::vector<std::string> fps = {"101", "010", "111", "000"};
-    const std::vector<size_t> lslots = {61, 63, 62, 0, 3, 12, 44, 55};
-    const std::vector<size_t> segments = {0, 1, 2, 3, 4, 10, 12, 56, 63};
-
     std::vector<TestDefaultTraits::KEY_TYPE> keys;
     std::vector<TestDefaultTraits::VALUE_TYPE> values;
-
-    for (size_t i = 0; i < fps.size(); ++i) {
-        for (size_t j = 0; j < lslots.size(); ++j) {
-            for (size_t k = 0; k < segments.size(); ++k) {
-                const auto key = static_cast<TestDefaultTraits::KEY_TYPE>(getFP(lslots[j], 0, segments[k], 12, fps[i]));
-                const TestDefaultTraits::VALUE_TYPE value = lslots[j] * 10 + i * 2 + 1;
-                keys.push_back(key);
-                values.push_back(value);
-                auto pt = ssdLog->write(key, value);
-                auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
-                sg.write(hash_val, *ssdLog.get(), pt);
-            }
-        }
+    
+    std::mt19937_64 setup_gen(42);
+    for (size_t i = 0; i < 150; ++i) { // Enough elements to densely populate segment without expanding too much
+        TestDefaultTraits::KEY_TYPE key = setup_gen();
+        TestDefaultTraits::VALUE_TYPE value = i;
+        keys.push_back(key);
+        values.push_back(value);
+        auto pt = ssdLog->write(key, value);
+        auto hash_val = Hashing<TestDefaultTraits>::hash_digest(key);
+        sg.write(hash_val, *ssdLog.get(), pt);
     }
 
     // Find any valid slot mapping that hits HT1 to center our batched queries on
@@ -42,17 +38,15 @@ int main() {
     
     for (auto k : keys) {
         auto test_fp = Hashing<TestDefaultTraits>::hash_digest(k);
-        uint32_t t_block = get_block_fast(test_fp, FP_index, TestDefaultTraits::directoryDepth);
-        uint32_t t_slot = test_fp.range_fast_one_reg(0,
-            FINGERPRINT_SIZE - FP_index,
-            FINGERPRINT_SIZE - FP_index + COUNT_SLOT_BITS);
+        uint32_t t_block = test_fp.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
+        uint32_t t_slot = test_fp.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
         
         auto ctx = sg.blockList[t_block].prepare_slot(t_slot, FP_index);
-        
         if (ctx.use_ht && !ctx.ten_one && ctx.slot_occupied) {
             target_block = t_block;
             target_lslot = t_slot;
             found_valid_slot = true;
+            std::cout << "Successfully found HT populated slot: " << t_slot << " in block: " << t_block << std::endl;
             break;
         }
     }
@@ -66,10 +60,8 @@ int main() {
     std::vector<TestDefaultTraits::KEY_TYPE> target_keys;
     for (auto k : keys) {
         auto test_fp = Hashing<TestDefaultTraits>::hash_digest(k);
-        uint32_t t_block = get_block_fast(test_fp, FP_index, TestDefaultTraits::directoryDepth);
-        uint32_t t_slot = test_fp.range_fast_one_reg(0,
-            FINGERPRINT_SIZE - FP_index,
-            FINGERPRINT_SIZE - FP_index + COUNT_SLOT_BITS);
+        uint32_t t_block = test_fp.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS * 2, FP_index - COUNT_SLOT_BITS);
+        uint32_t t_slot = test_fp.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
         if (t_block == target_block && t_slot == target_lslot) {
             target_keys.push_back(k);
         }
