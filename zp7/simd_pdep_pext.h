@@ -23,6 +23,9 @@ namespace simd_utils {
 #if defined(__AVX2__)
 template <int MAX_MASK_BITS = 64, bool EARLY_EXIT = true>
 inline void simd_pext_u64_batch(const uint64_t* data_arr, const uint64_t* mask_arr, uint64_t* out_arr, size_t n) {
+    static_assert(MAX_MASK_BITS > 0);
+    static_assert(MAX_MASK_BITS <= 32);
+    
     const __m256i one = _mm256_set1_epi64x(1);
     const __m256i zero = _mm256_setzero_si256();
     

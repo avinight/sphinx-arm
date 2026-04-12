@@ -11,12 +11,14 @@
 #include "../fingerprint_gen_helper/fingerprint_gen_helper.h"
 #include "../config/config.h"
 
+#include <filesystem>
+
 int main() {
 	generate_hashtable(ht1, signatures_h1, important_bits_h1, indices_h1, arr_h1);
 
 	constexpr size_t FP_index = 12;
 	Segment<TestDefaultTraits> sg(FP_index);
-	const auto ssdLog = std::make_unique<SSDLog<TestDefaultTraits>>("segment_bench_get_index_two_phase.txt", 100);
+	auto ssdLog = std::make_unique<SSDLog<TestDefaultTraits>>("segment_bench_get_index_two_phase.txt", 100);
 
 	std::vector<TestDefaultTraits::KEY_TYPE> keys;
 	std::vector<TestDefaultTraits::VALUE_TYPE> values;
@@ -132,7 +134,7 @@ int main() {
 
 	auto start_prepared = std::chrono::high_resolution_clock::now();
 	for (size_t i = 0; i < NUM_QUERIES; ++i) {
-		results_prepared[i] = sg.read_prepared(queries[i], *ssdLog.get());
+		results_prepared[i] = sg.read(queries[i], *ssdLog.get());
 	}
 	auto end_prepared = std::chrono::high_resolution_clock::now();
 	auto ms_prepared = std::chrono::duration_cast<std::chrono::milliseconds>(end_prepared - start_prepared).count();
@@ -143,7 +145,7 @@ int main() {
 	auto ms_batch = std::chrono::duration_cast<std::chrono::milliseconds>(end_batch - start_batch).count();
 
 	auto start_batch_pext = std::chrono::high_resolution_clock::now();
-	sg.read_batch_pext(queries.data(), results_batch_pext.data(), NUM_QUERIES, *ssdLog.get());
+	sg.read_batch_simd(queries.data(), results_batch_pext.data(), NUM_QUERIES, *ssdLog.get());
 	auto end_batch_pext = std::chrono::high_resolution_clock::now();
 	auto ms_batch_pext = std::chrono::duration_cast<std::chrono::milliseconds>(end_batch_pext - start_batch_pext).count();
 
@@ -168,13 +170,17 @@ int main() {
 	std::cout << "prepare+SIMD resolve_offset time: " << ms_prepare_simd << " ms" << std::endl;
 	std::cout << "read_prepared time: " << ms_prepared << " ms" << std::endl;
 	std::cout << "read_batch time: " << ms_batch << " ms" << std::endl;
-	std::cout << "read_batch_pext time: " << ms_batch_pext << " ms" << std::endl;
-	std::cout << "Speedup (read_batch / read_batch_pext): " << static_cast<double>(ms_batch) / static_cast<double>(ms_batch_pext) << "x" << std::endl;
-	std::cout << "Speedup (read_prepared / read_batch_pext): " << static_cast<double>(ms_prepared) / static_cast<double>(ms_batch_pext) << "x" << std::endl;
+	std::cout << "read_batch_simd time: " << ms_batch_pext << " ms" << std::endl;
+	std::cout << "Speedup (read_batch / read_batch_simd): " << static_cast<double>(ms_batch) / static_cast<double>(ms_batch_pext) << "x" << std::endl;
+	std::cout << "Speedup (read_prepared / read_batch_simd): " << static_cast<double>(ms_prepared) / static_cast<double>(ms_batch_pext) << "x" << std::endl;
 	std::cout << "Speedup (get_index / simd): " << static_cast<double>(ms_get_index) / static_cast<double>(ms_simd) << "x" << std::endl;
 	std::cout << "Speedup (get_index / prepare+simd): " << static_cast<double>(ms_get_index) / static_cast<double>(ms_prepare_simd) << "x" << std::endl;
 	std::cout << "Speedup (zp7 / simd): " << static_cast<double>(ms_zp7) / static_cast<double>(ms_simd) << "x" << std::endl;
 	std::cout << "Checksum (get_index/zp7/simd/prepare+simd): " << sum_get_index << " / " << sum_zp7 << " / " << sum_simd << " / " << sum_prepare_simd << std::endl;
+    
+    // Cleanup
+    ssdLog.reset(); // Close file handle before removal
+    std::filesystem::remove("segment_bench_get_index_two_phase.txt");
 
 	return 0;
 }

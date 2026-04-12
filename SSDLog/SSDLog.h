@@ -120,6 +120,10 @@ class SSDLog {
         }
     }
 
+    PAYLOAD_TYPE get_page_address(PAYLOAD_TYPE address) const {
+        return address >> num_entries_per_page_log;
+    }
+
     PAYLOAD_TYPE write(KEY_TYPE key, VALUE_TYPE value) {
         const size_t pageIndex = lastValidPage;
         const size_t entryIndex = writeBuffer.size();
@@ -134,8 +138,13 @@ class SSDLog {
         return address;
     }
 
-    PAYLOAD_TYPE get_page_address(PAYLOAD_TYPE address) const {
-        return (address >> num_entries_per_page_log);
+    void prefetch(PAYLOAD_TYPE address) const {
+        if constexpr (Traits::IN_MEMORY) {
+            const size_t pageIndex = address >> num_entries_per_page_log;
+            const size_t entryIndex = address & ((1 << num_entries_per_page_log) - 1);
+            const off_t offset = pageIndex * PAGE_SIZE + entryIndex * entrySize;
+            __builtin_prefetch(&inMemoryFile[offset], 0, 3);
+        }
     }
 
     // bool shows if it successfully used the buffer pool

@@ -370,34 +370,7 @@ class Block {
                                       FP_index, new_total_ten);
     }
 
-    // Combined two-phase read: equivalent to read() but using prepare_slot + resolve_offset.
-    // Useful for validating that the two-phase decomposition produces identical results.
-    std::optional<ENTRY_TYPE> read_prepared(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint,
-                                            const SSDLog<Traits> &ssdLog,
-                                            size_t FP_index) {
-        const auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
-        SlotContext ctx = prepare_slot(slot_index, FP_index);
-        size_t offset = resolve_offset(ctx, fingerprint, FP_index);
-        const size_t payload_index = ctx.payload_base + offset;
 
-        if (static_cast<int64_t>(payload_index) > get_max_index())
-            return std::nullopt;
-
-        auto payload = payload_list[payload_index];
-        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
-            auto res = payload_list.get_extra_bits_at(payload_index);
-            auto chunked_fp = fingerprint.range_fast_one_reg(0, FP_index, FP_index + res.first);
-            if (chunked_fp != res.second)
-                return std::nullopt;
-        }
-        ENTRY_TYPE kv;
-        ssdLog.read(payload, kv);
-        if constexpr (Traits::NUMBER_EXTRA_BITS > 1) {
-            auto new_fp = Hashing<Traits>::hash_digest(kv.key);
-            payload_list.set_extra_bits_at(new_fp.range_fast_one_reg(0, FP_index, REGISTER_SIZE), payload_index, 0);
-        }
-        return kv;
-    }
     std::pair<size_t, size_t> get_index_dht(BitsetWrapper<FINGERPRINT_SIZE> &fingerprint, size_t FP_index) {
         const auto slot_index = fingerprint.range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
         size_t payload_idx = 0;

@@ -10,12 +10,14 @@
 #include "../fingerprint_gen_helper/fingerprint_gen_helper.h"
 #include "../config/config.h"
 
+#include <filesystem>
+
 int main() {
     generate_hashtable(ht1, signatures_h1, important_bits_h1, indices_h1, arr_h1);
     
     constexpr size_t FP_index = 12;
     Segment<TestDefaultTraits> sg(FP_index);
-    const auto ssdLog = std::make_unique<SSDLog<TestDefaultTraits>>("segment_bench_pext.txt", 100);
+    auto ssdLog = std::make_unique<SSDLog<TestDefaultTraits>>("segment_bench_pext.txt", 100);
 
     std::vector<TestDefaultTraits::KEY_TYPE> keys;
     std::vector<TestDefaultTraits::VALUE_TYPE> values;
@@ -78,37 +80,50 @@ int main() {
     
     std::vector<std::optional<TestDefaultTraits::ENTRY_TYPE>> results(NUM_QUERIES);
     
+    auto run_bench_avg = [&](auto fn, size_t runs = 5) {
+        double total_ms = 0.0;
+        for (size_t run = 0; run < runs; ++run) {
+            auto start = std::chrono::high_resolution_clock::now();
+            fn();
+            auto end = std::chrono::high_resolution_clock::now();
+            total_ms += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        }
+        return total_ms / static_cast<double>(runs);
+    };
+
     // Benchmark scalar original read
-    auto start_scalar = std::chrono::high_resolution_clock::now();
-    for(size_t i=0; i<NUM_QUERIES; ++i) {
-        results[i] = sg.read(queries[i], *ssdLog.get());
-    }
-    auto end_scalar = std::chrono::high_resolution_clock::now();
-    auto ms_scalar = std::chrono::duration_cast<std::chrono::milliseconds>(end_scalar - start_scalar).count();
-    
-    // Benchmark Two Phase Batched
+    double avg_ms_scalar = run_bench_avg([&]() {
+        for(size_t i=0; i<NUM_QUERIES; ++i) {
+            results[i] = sg.read(queries[i], *ssdLog.get());
+        }
+    });
+
+    // Benchmark Unified read_batch (SIMD + Prefetching)
     std::vector<std::optional<TestDefaultTraits::ENTRY_TYPE>> results_batch(NUM_QUERIES);
-    auto start_batch = std::chrono::high_resolution_clock::now();
-    sg.read_batch_pext(queries.data(), results_batch.data(), NUM_QUERIES, *ssdLog.get());
-    auto end_batch = std::chrono::high_resolution_clock::now();
-    auto ms_batch = std::chrono::duration_cast<std::chrono::milliseconds>(end_batch - start_batch).count();
-    
+    double avg_ms_batch = run_bench_avg([&]() {
+        sg.read_batch(queries.data(), results_batch.data(), NUM_QUERIES, *ssdLog.get());
+    });
+
     // Verification
     for(size_t i=0; i<NUM_QUERIES; ++i) {
-        if (!results[i].has_value() || !results_batch[i].has_value() || 
+        if (!results[i].has_value() || !results_batch[i].has_value() ||
             results[i].value().value != results_batch[i].value().value) {
             std::cerr << "Mismatch at " << i << ". Scalar read: " << (results[i].has_value() ? results[i].value().value : -1) 
-                      << " Batch read: " << (results_batch[i].has_value() ? results_batch[i].value().value : -1) << std::endl;
+                      << " Unified Batch read: " << (results_batch[i].has_value() ? results_batch[i].value().value : -1) << std::endl;
             return 1;
         }
     }
     
-    std::cout << "--- Two-Phase Slot Resolution vs Regular get_index ---" << std::endl;
+    std::cout << "--- Unified Batch Performance (Averaged over 5 runs) ---" << std::endl;
     std::cout << "Architecture SIMD capability active: " << SIMD_ARCH_NAME << std::endl;
     std::cout << "Queries: " << NUM_QUERIES << std::endl;
-    std::cout << "Regular read() time: " << ms_scalar << " ms" << std::endl;
-    std::cout << "Two-Phase read_batch_pext() time (including grouping overhead): " << ms_batch << " ms" << std::endl;
-    std::cout << "Speedup: " << static_cast<double>(ms_scalar) / static_cast<double>(ms_batch) << "x" << std::endl;
+    std::cout << "Regular read() (Scalar):  " << avg_ms_scalar << " ms" << std::endl;
+    std::cout << "Unified read_batch():     " << avg_ms_batch << " ms" << std::endl;
+    std::cout << "Total Speedup:            " << avg_ms_scalar / avg_ms_batch << "x" << std::endl;
     
+    // Cleanup
+    ssdLog.reset(); // Close file handle before removal
+    std::filesystem::remove("segment_bench_pext.txt");
+
     return 0;
 }
