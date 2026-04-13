@@ -268,15 +268,12 @@ class Segment {
         return res;
     }
 
-    // Unified batch read path. Attempts an all-or-nothing SIMD fast path first.
-    // Falls back to a robust sequential loop for complex queries (Extensions, DHT).
     void read_batch(BitsetWrapper<FINGERPRINT_SIZE> *fingerprints,
                     std::optional<ENTRY_TYPE> *results,
                     size_t count,
                     const SSDLog<Traits> &ssdLog) const {
         if (count == 0) return;
 #if HAS_SIMD_PDEP_PEXT
-        // Attempt Fast Path: Batch-wide SIMD PEXT
         if (read_batch_simd(fingerprints, results, count, ssdLog)) {
             return;
         }
@@ -298,8 +295,6 @@ class Segment {
         uint32_t slotIdx;
     };
 
-    // SIMD Fast-Path. Processes the entire batch using SIMD PEXT if possible.
-    // Returns false if any query requires non-standard resolution (ExtensionBlocks, DHT).
     inline __attribute__((always_inline))
     bool read_batch_simd(BitsetWrapper<FINGERPRINT_SIZE> *fingerprints,
                          std::optional<ENTRY_TYPE> *results,

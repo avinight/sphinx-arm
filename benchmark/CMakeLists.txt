@@ -113,7 +113,6 @@ target_link_libraries(benchmark_pext_batch
         segment
 )
 
-# Register benchmarks as tests for 'ctest' integration
 add_test(NAME benchmark_pext_batch COMMAND benchmark_pext_batch)
 add_test(NAME benchmark_zp7 COMMAND benchmark_zp7)
 add_test(NAME benchmark_get_index_vs_two_phase COMMAND benchmark_get_index_vs_two_phase)
