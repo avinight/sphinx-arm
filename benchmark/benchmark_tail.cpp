@@ -110,6 +110,9 @@ std::vector<double> runQueryTest(const std::vector<size_t>& queryKeys,
     for (int round = 0; round < numRounds; ++round) {
         std::cout << "Round " << round << std::endl;
         for (size_t i = 0; i < queryKeys.size(); ++i) {
+            if (i > 0 && (i % 100000) == 0) {
+                std::cout << "  progress: " << i << " / " << queryKeys.size() << std::endl;
+            }
             size_t key = queryKeys[i];
             auto start = std::chrono::high_resolution_clock::now();
             queryOp(key);

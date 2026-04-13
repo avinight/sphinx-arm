@@ -176,6 +176,10 @@ inline constexpr uint64_t u_nz8(uint64_t x) {
     return (((x | H8) - L8) | x) & H8;
 }
 
+/**
+ * @brief Parallel select (byte-wise).
+ * Returns the position of the k-th set bit.
+ */
 static inline uint64_t _select_64(uint64_t x, int k) {
     // Broadword SWAR Fallback (Vigna's Algorithm)
     uint64_t s = x - ((x & 0xAAAAAAAAAAAAAAAAULL) >> 1);
@@ -613,7 +617,6 @@ class BitsetWrapper {
                 bitPosition = __builtin_ctzll(depositMask);
                 bitPosition_left = __builtin_clzll(depositMask); 
             } else {
-                // Fallback using _select64 twice if no PDEP is available at all
                 bitPosition = _select64(block, nth - count - 1);
                 bitPosition_left = _select64(block, nth - count);
             }

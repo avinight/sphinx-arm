@@ -23,6 +23,16 @@
 #pragma once
 #include <stdint.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#   define ZP7_ALWAYS_INLINE __attribute__((always_inline)) inline
+#   define ZP7_LIKELY(x) __builtin_expect(!!(x), 1)
+#   define ZP7_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#   define ZP7_ALWAYS_INLINE inline
+#   define ZP7_LIKELY(x) (x)
+#   define ZP7_UNLIKELY(x) (x)
+#endif
+
 #if defined(__x86_64__) || defined(__i386__)
 #   include <immintrin.h>
 #elif defined(__aarch64__) || defined(__arm__)
@@ -106,12 +116,80 @@
 typedef struct {
     uint64_t mask;
     uint64_t ppp_bit[N_BITS];
+    uint8_t byte_prefix[9];
 } zp7_masks_64_t;
+
+#if defined(__aarch64__) || defined(__arm__)
+typedef struct {
+    uint8_t popcnt[256];
+    uint8_t compress[256][256];
+    uint8_t deposit[256][256];
+    uint8_t select[256][8];
+} zp7_pext_lut_t;
+
+static ZP7_ALWAYS_INLINE uint8_t zp7_pext8_fallback(uint8_t a, uint8_t mask) {
+    uint8_t out = 0;
+    uint8_t out_bit = 0;
+    while (mask) {
+        const uint8_t lsb = static_cast<uint8_t>(mask & static_cast<uint8_t>(-mask));
+        if (a & lsb) {
+            out |= static_cast<uint8_t>(1u << out_bit);
+        }
+        ++out_bit;
+        mask = static_cast<uint8_t>(mask & static_cast<uint8_t>(mask - 1));
+    }
+    return out;
+}
+
+static ZP7_ALWAYS_INLINE uint8_t zp7_pdep8_fallback(uint8_t a, uint8_t mask) {
+    uint8_t out = 0;
+    uint8_t in_bit = 0;
+    while (mask) {
+        const uint8_t lsb = static_cast<uint8_t>(mask & static_cast<uint8_t>(-mask));
+        if (a & static_cast<uint8_t>(1u << in_bit)) {
+            out = static_cast<uint8_t>(out | lsb);
+        }
+        ++in_bit;
+        mask = static_cast<uint8_t>(mask & static_cast<uint8_t>(mask - 1));
+    }
+    return out;
+}
+
+static inline const zp7_pext_lut_t &zp7_get_pext_lut() {
+    static const zp7_pext_lut_t lut = [] {
+        zp7_pext_lut_t t{};
+        for (unsigned m = 0; m < 256; ++m) {
+            uint8_t mm = static_cast<uint8_t>(m);
+            uint8_t pc = 0;
+            for (uint8_t x = mm; x; x = static_cast<uint8_t>(x & static_cast<uint8_t>(x - 1))) {
+                ++pc;
+            }
+            t.popcnt[m] = pc;
+            for (unsigned a = 0; a < 256; ++a) {
+                t.compress[m][a] = zp7_pext8_fallback(static_cast<uint8_t>(a), mm);
+                t.deposit[m][a] = zp7_pdep8_fallback(static_cast<uint8_t>(a), mm);
+            }
+
+            uint8_t bit_index = 0;
+            for (unsigned bit = 0; bit < 8; ++bit) {
+                if (mm & static_cast<uint8_t>(1u << bit)) {
+                    t.select[m][bit_index++] = static_cast<uint8_t>(bit);
+                }
+            }
+            for (; bit_index < 8; ++bit_index) {
+                t.select[m][bit_index] = 8;
+            }
+        }
+        return t;
+    }();
+    return lut;
+}
+#endif
 
 #ifndef HAS_CLMUL
 // If we don't have access to the CLMUL instruction, emulate it with
 // shifts and XORs
-static inline uint64_t prefix_sum(uint64_t x) {
+static ZP7_ALWAYS_INLINE uint64_t prefix_sum(uint64_t x) {
     x ^= x << 1;
     x ^= x << 2;
     x ^= x << 4;
@@ -125,7 +203,7 @@ static inline uint64_t prefix_sum(uint64_t x) {
 #ifndef HAS_POPCNT
 #if defined(__aarch64__)
 // POPCNT polyfill. ARMv8 has a vcnt instruction that counts bits in parallel across a 64-bit lane, so we can use that.
-uint64_t popcnt_64(uint64_t x) {
+static ZP7_ALWAYS_INLINE uint64_t popcnt_64(uint64_t x) {
     uint8x8_t v = vcnt_u8(vcreate_u8(x));
     return vaddv_u8(v);
 }
@@ -133,7 +211,7 @@ uint64_t popcnt_64(uint64_t x) {
 #else
 // POPCNT polyfill. See this page for information about the algorithm:
 // https://www.chessprogramming.org/Population_Count#SWAR-Popcount
-uint64_t popcnt_64(uint64_t x) {
+static ZP7_ALWAYS_INLINE uint64_t popcnt_64(uint64_t x) {
     // Match the SWAR form used in bitset_wrapper.h
     constexpr uint64_t L8 = 0x0101010101010101ULL;
     uint64_t s = x - ((x & 0xAAAAAAAAAAAAAAAAULL) >> 1);
@@ -144,16 +222,29 @@ uint64_t popcnt_64(uint64_t x) {
 #endif
 #endif
 
-// Parallel-prefix-popcount. This is used by both the PEXT/PDEP polyfills.
-// It can also be called separately and cached, if the mask values will be used
-// more than once (these can be shared across PEXT and PDEP calls if they use
-// the same masks). 
-zp7_masks_64_t zp7_ppp_64(uint64_t mask) {
-    zp7_masks_64_t r;
+// Parallel-prefix-popcount. This is shared by both PEXT and PDEP.
+// The cached byte_prefix data is also used by the select helper below.
+static ZP7_ALWAYS_INLINE zp7_masks_64_t zp7_ppp_64(uint64_t mask) {
+    zp7_masks_64_t r{};
     r.mask = mask;
 
     // Count *unset* bits
     mask = ~mask;
+
+    // Cache byte-level prefix popcounts for fast select queries.
+    // byte_prefix[i] = number of set bits in bytes [0, i).
+    uint8_t prefix = 0;
+    r.byte_prefix[0] = 0;
+    for (unsigned i = 0; i < 8; ++i) {
+    #if defined(__GNUC__) || defined(__clang__)
+        prefix = static_cast<uint8_t>(prefix + __builtin_popcountll((r.mask >> (i * 8)) & 0xFFULL));
+    #elif defined(_MSC_VER)
+        prefix = static_cast<uint8_t>(prefix + __popcnt64((r.mask >> (i * 8)) & 0xFFULL));
+    #else
+        prefix = static_cast<uint8_t>(prefix + popcnt_64((r.mask >> (i * 8)) & 0xFFULL));
+    #endif
+        r.byte_prefix[i + 1] = prefix;
+    }
 
 #if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
     // ARMv8 Crypto Extension: Polynomial Multiply Long
@@ -212,32 +303,141 @@ zp7_masks_64_t zp7_ppp_64(uint64_t mask) {
     return r;
 }
 
-// PEXT
+// ---------------------------------------------------------------------------
+// Forward declarations
+// ---------------------------------------------------------------------------
 
-uint64_t zp7_pext_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
+static ZP7_ALWAYS_INLINE uint64_t zp7_pdep_pre_64(uint64_t a, const zp7_masks_64_t *masks);
+
+
+// ---------------------------------------------------------------------------
+// PEXT helpers
+// ---------------------------------------------------------------------------
+
+static ZP7_ALWAYS_INLINE uint64_t zp7_pext_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
     // Mask only the bits that are set in the input mask. Otherwise they collide
     // with input bits and screw everything up
     a &= masks->mask;
 
-    // For each bit in the PPP, shift right only those bits that are set in
-    // that bit's mask
-    for (int i = 0; i < N_BITS; i++) {
-        uint64_t shift = 1 << i;
-        uint64_t bit = masks->ppp_bit[i];
-        // Shift only the input bits that are set in
+    for (int i = 0; i < N_BITS; ++i) {
+        const uint64_t shift = 1ULL << i;
+        const uint64_t bit = masks->ppp_bit[i];
         a = (a & ~bit) | ((a & bit) >> shift);
     }
+
     return a;
 }
 
-uint64_t zp7_pext_64(uint64_t a, uint64_t mask) {
-    zp7_masks_64_t masks = zp7_ppp_64(mask);
-    return zp7_pext_pre_64(a, &masks);
+#if defined(__aarch64__) || defined(__arm__)
+static ZP7_ALWAYS_INLINE uint64_t zp7_pext_arm_64(uint64_t a, uint64_t mask) {
+    // ARM fast path: 8-bit PEXT LUT + byte-wise packing.
+    const zp7_pext_lut_t &lut = zp7_get_pext_lut();
+
+    uint64_t out = 0;
+    unsigned shift = 0;
+    for (unsigned i = 0; i < 8; ++i) {
+        const uint8_t m8 = static_cast<uint8_t>(mask >> (i * 8));
+        const uint8_t a8 = static_cast<uint8_t>(a >> (i * 8));
+        out |= static_cast<uint64_t>(lut.compress[m8][a8]) << shift;
+        shift += lut.popcnt[m8];
+    }
+
+    return out;
+}
+#endif
+
+static ZP7_ALWAYS_INLINE uint64_t zp7_select_pre_64(uint64_t rank, const zp7_masks_64_t *masks) {
+#if defined(__aarch64__) || defined(__arm__)
+    const zp7_pext_lut_t &lut = zp7_get_pext_lut();
+    const uint64_t mask = masks->mask;
+    unsigned byte = 0;
+
+    byte |= static_cast<unsigned>(rank >= masks->byte_prefix[4]) << 2;
+    byte |= static_cast<unsigned>(rank >= masks->byte_prefix[byte + 2]) << 1;
+    byte |= static_cast<unsigned>(rank >= masks->byte_prefix[byte + 1]);
+
+    const uint8_t byte_mask = static_cast<uint8_t>(mask >> (byte * 8));
+    const uint8_t rank_in_byte = static_cast<uint8_t>(rank - masks->byte_prefix[byte]);
+    return static_cast<uint64_t>((byte * 8) + lut.select[byte_mask][rank_in_byte]);
+#else
+    const uint64_t nth_bit_mask = 1ULL << rank;
+    const uint64_t deposited = zp7_pdep_pre_64(nth_bit_mask, masks);
+    return static_cast<uint64_t>(__builtin_ctzll(deposited));
+#endif
 }
 
-// PDEP
+static ZP7_ALWAYS_INLINE uint64_t zp7_pext_64(uint64_t a, uint64_t mask) {
+    // Common degenerate masks can avoid PPP setup entirely.
+    if (ZP7_UNLIKELY(mask == 0ULL)) {
+        return 0ULL;
+    }
+    if (ZP7_UNLIKELY(mask == ~0ULL)) {
+        return a;
+    }
+    // If mask is contiguous low bits (2^k - 1), PEXT is just an AND.
+    if (ZP7_UNLIKELY((mask & (mask + 1ULL)) == 0ULL)) {
+        return a & mask;
+    }
 
-uint64_t zp7_pdep_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
+#if defined(__aarch64__) || defined(__arm__)
+    return zp7_pext_arm_64(a, mask);
+#endif
+
+    // Fused one-shot PEXT: compute PPP bits and apply shifts immediately.
+    // This avoids writing/reading a temporary zp7_masks_64_t on hot paths.
+    a &= mask;
+    uint64_t m = ~mask;
+
+#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
+    const uint64_t neg_2 = -2ULL;
+
+    for (int i = 0; i < N_BITS - 1; ++i) {
+        const uint64_t shift = 1ULL << i;
+        const poly128_t p = vmull_p64((poly64_t)m, (poly64_t)neg_2);
+        const uint64_t bit = vgetq_lane_u64(vreinterpretq_u64_p128(p), 0);
+        a = (a & ~bit) | ((a & bit) >> shift);
+        m &= bit;
+    }
+
+    const uint64_t b_last = -m << 1;
+    a = (a & ~b_last) | ((a & b_last) >> (1ULL << (N_BITS - 1)));
+    return a;
+
+#elif defined(HAS_CLMUL)
+    __m128i m128 = _mm_cvtsi64_si128(m);
+    const __m128i neg_2 = _mm_cvtsi64_si128(-2LL);
+
+    for (int i = 0; i < N_BITS - 1; ++i) {
+        const uint64_t shift = 1ULL << i;
+        const __m128i p = _mm_clmulepi64_si128(m128, neg_2, 0);
+        const uint64_t bit = _mm_cvtsi128_si64(p);
+        a = (a & ~bit) | ((a & bit) >> shift);
+        m128 = _mm_and_si128(m128, p);
+    }
+
+    const uint64_t b_last = -_mm_cvtsi128_si64(m128) << 1;
+    a = (a & ~b_last) | ((a & b_last) >> (1ULL << (N_BITS - 1)));
+    return a;
+
+#else
+    for (int i = 0; i < N_BITS - 1; ++i) {
+        const uint64_t shift = 1ULL << i;
+        const uint64_t bit = prefix_sum(m << 1);
+        a = (a & ~bit) | ((a & bit) >> shift);
+        m &= bit;
+    }
+
+    const uint64_t b_last = -m << 1;
+    a = (a & ~b_last) | ((a & b_last) >> (1ULL << (N_BITS - 1)));
+    return a;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// PDEP helpers
+// ---------------------------------------------------------------------------
+
+static ZP7_ALWAYS_INLINE uint64_t zp7_pdep_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
 #if defined(__GNUC__) || defined(__clang__)
     uint64_t popcnt = static_cast<uint64_t>(__builtin_popcountll(masks->mask));
 #elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
@@ -259,10 +459,10 @@ uint64_t zp7_pdep_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
     a = _bzhi_u64(a, popcnt);
 #elif defined(__aarch64__)
     // THEORETICAL BEST FOR ARM (M1/AArch64)
-    // 1. Constant Width: If the compiler knows 'popcnt' at compile-time (via inlining), 
+    // 1. Constant Width: If the compiler knows 'popcnt' at compile-time (via inlining),
     //    it completely deletes this logic and emits a single 1-cycle `UBFX` or `AND` instruction.
-    // 2. Variable Width: If 'popcnt' is dynamic, the ternary operator forces the compiler 
-    //    to emit a branchless `CMP` + `CSEL` (Conditional Select) instruction pair. 
+    // 2. Variable Width: If 'popcnt' is dynamic, the ternary operator forces the compiler
+    //    to emit a branchless `CMP` + `CSEL` (Conditional Select) instruction pair.
     //    This safely bypasses the 64-bit shift wrap-around bug in just ~3 cycles.
     a &= (popcnt == 64) ? ~0ULL : ((1ULL << popcnt) - 1);
 #else
@@ -286,7 +486,35 @@ uint64_t zp7_pdep_pre_64(uint64_t a, const zp7_masks_64_t *masks) {
     return a;
 }
 
-uint64_t zp7_pdep_64(uint64_t a, uint64_t mask) {
+#if defined(__aarch64__) || defined(__arm__)
+static ZP7_ALWAYS_INLINE uint64_t zp7_pdep_arm_64(uint64_t a, uint64_t mask) {
+    if (ZP7_UNLIKELY(mask == 0ULL)) {
+        return 0ULL;
+    }
+    if (ZP7_UNLIKELY(mask == ~0ULL)) {
+        return a;
+    }
+
+    const zp7_pext_lut_t &lut = zp7_get_pext_lut();
+
+    uint64_t in = a;
+    uint64_t out = 0;
+
+    for (unsigned i = 0; i < 8; ++i) {
+        const uint8_t m8 = static_cast<uint8_t>(mask >> (i * 8));
+        out |= static_cast<uint64_t>(lut.deposit[m8][static_cast<uint8_t>(in)]) << (i * 8);
+        in >>= lut.popcnt[m8];
+    }
+
+    return out;
+}
+#endif
+
+static ZP7_ALWAYS_INLINE uint64_t zp7_pdep_64(uint64_t a, uint64_t mask) {
+#if defined(__aarch64__) || defined(__arm__)
+    return zp7_pdep_arm_64(a, mask);
+#endif
+
     zp7_masks_64_t masks = zp7_ppp_64(mask);
     return zp7_pdep_pre_64(a, &masks);
 }

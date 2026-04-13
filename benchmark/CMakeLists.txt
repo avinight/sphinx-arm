@@ -14,13 +14,19 @@ add_executable(benchmark_xdp benchmark_xdp.cpp ${SOURCE_FILES})
 add_executable(benchmark_load_factor_query_insert benchmark_load_factor_query_insert.cpp ${SOURCE_FILES})
 add_executable(benchmark_extra_bits benchmark_extra_bits.cpp ${SOURCE_FILES})
 add_executable(benchmark_tail benchmark_tail.cpp ${SOURCE_FILES})
+add_executable(benchmark_pext_batch benchmark_pext_batch.cpp)
+add_executable(benchmark_get_index_vs_two_phase benchmark_get_index_vs_two_phase.cpp)
 add_executable(benchmark_zp7 benchmark_zp7.cpp)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64|i.86")
                 target_compile_options(benchmark_zp7 PRIVATE -march=native -mbmi2)
+                target_compile_options(benchmark_pext_batch PRIVATE -march=native -mbmi2)
+                target_compile_options(benchmark_get_index_vs_two_phase PRIVATE -march=native -mbmi2)
         elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
                 target_compile_options(benchmark_zp7 PRIVATE -march=native)
+                target_compile_options(benchmark_pext_batch PRIVATE -march=native)
+                target_compile_options(benchmark_get_index_vs_two_phase PRIVATE -march=native)
         endif()
 endif()
 
@@ -89,6 +95,28 @@ target_link_libraries(benchmark_tail
         segment
 )
 target_link_libraries(benchmark_load_factor_query_insert
+        PRIVATE
+        directory
+        block
+        hashtable
+        SSDLog
+        extension_block
+        segment
+)
+target_link_libraries(benchmark_pext_batch
+        PRIVATE
+        directory
+        block
+        hashtable
+        SSDLog
+        extension_block
+        segment
+)
+
+add_test(NAME benchmark_pext_batch COMMAND benchmark_pext_batch)
+add_test(NAME benchmark_zp7 COMMAND benchmark_zp7)
+add_test(NAME benchmark_get_index_vs_two_phase COMMAND benchmark_get_index_vs_two_phase)
+target_link_libraries(benchmark_get_index_vs_two_phase
         PRIVATE
         directory
         block
