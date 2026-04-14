@@ -94,7 +94,8 @@ class SSDLog {
 #elif defined(__APPLE__)
             fd = open(filename.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
             if (fd == -1) {
-                throw std::runtime_error(std::string("Failed to open file: ") + std::strerror(errno));
+                throw std::runtime_error(std::string("Failed to open file '") + filename +
+                                          "': " + std::strerror(errno));
             }
 
         // bypass cache on macOS
