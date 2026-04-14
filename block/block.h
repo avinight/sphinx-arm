@@ -333,10 +333,15 @@ class Block {
             return 0;
 
         if (ctx.use_ht) {
+#if HAS_SIMD_PDEP_PEXT
             uint64_t pext_out = 0;
             simd_utils::simd_pext_u64_shared_mask<64, true>(
                 &fingerprint.bitset[0], ctx.pext_mask, &pext_out, 1);
             const auto important_bits = static_cast<uint64_t>(pext_out);
+#else
+            const auto important_bits = static_cast<uint64_t>(
+                zp7_pext_64(fingerprint.bitset[0], ctx.pext_mask));
+#endif
             const auto low_bit = important_bits * 3;
             return (ctx.indices_lookup >> low_bit) & (0b111);
         }

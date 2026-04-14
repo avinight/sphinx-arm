@@ -24,7 +24,7 @@ namespace simd_utils {
 template <int MAX_MASK_BITS = 64, bool EARLY_EXIT = true>
 inline void simd_pext_u64_batch(const uint64_t* data_arr, const uint64_t* mask_arr, uint64_t* out_arr, size_t n) {
     static_assert(MAX_MASK_BITS > 0);
-    static_assert(MAX_MASK_BITS <= 32);
+    static_assert(MAX_MASK_BITS <= 64);
     
     const __m256i one = _mm256_set1_epi64x(1);
     const __m256i zero = _mm256_setzero_si256();
@@ -49,7 +49,7 @@ inline void simd_pext_u64_batch(const uint64_t* data_arr, const uint64_t* mask_a
             mask = m1;
             bit = _mm256_add_epi64(bit, bit); 
             
-            if (EARLY_EXIT && _mm256_testc_si256(zero, mask)) break;
+            if (EARLY_EXIT && _mm256_testz_si256(mask, mask)) break;
         }
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(&out_arr[i]), out);
     }
@@ -98,7 +98,7 @@ inline void simd_pext_u64_shared_mask(const uint64_t* data_arr, uint64_t shared_
             mask = m1;
             bit = _mm256_add_epi64(bit, bit);
             
-            if (EARLY_EXIT && _mm256_testc_si256(zero, mask)) break;
+            if (EARLY_EXIT && _mm256_testz_si256(mask, mask)) break;
         }
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(&out_arr[i]), out);
     }
@@ -146,7 +146,7 @@ inline void simd_pdep_u64_batch(const uint64_t* data_arr, const uint64_t* mask_a
             mask = m1;
             bit = _mm256_add_epi64(bit, bit);
             
-            if (EARLY_EXIT && _mm256_testc_si256(zero, mask)) break;
+            if (EARLY_EXIT && _mm256_testz_si256(mask, mask)) break;
         }
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(&out_arr[i]), out);
     }
