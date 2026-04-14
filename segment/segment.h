@@ -375,7 +375,7 @@ class Segment {
                 for (size_t g = 0; g < group_size; g++) {
                     size_t low_bit = pext_out[g] * 3;
                     size_t offset = (ctx.indices_lookup >> low_bit) & 0b111;
-                    ssdLog.prefetch(ctx.payload_base + offset);
+                    ssdLog.prefetch(blk.payload_list[ctx.payload_base + offset]);
                 }
 
                 // Batch resolve payloads
