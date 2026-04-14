@@ -92,62 +92,31 @@ int main() {
 	std::vector<uint8_t> offsets_zp7(NUM_QUERIES);
 	std::vector<uint8_t> offsets_simd(NUM_QUERIES);
 	std::vector<uint8_t> offsets_prepare_simd(NUM_QUERIES);
+	// --- Correctness validation (single pass) ---
 	std::uint64_t sum_get_index = 0;
 	std::uint64_t sum_zp7 = 0;
 	std::uint64_t sum_simd = 0;
 	std::uint64_t sum_prepare_simd = 0;
 
-	auto start_get_index = std::chrono::high_resolution_clock::now();
 	for (size_t i = 0; i < NUM_QUERIES; ++i) {
 		auto idx_pair = blk.get_index(queries[i], FP_index);
 		offsets_get_index[i] = static_cast<uint8_t>(idx_pair.second);
 		sum_get_index += offsets_get_index[i];
 	}
-	auto end_get_index = std::chrono::high_resolution_clock::now();
-	auto ms_get_index = std::chrono::duration_cast<std::chrono::milliseconds>(end_get_index - start_get_index).count();
-
-	auto start_zp7 = std::chrono::high_resolution_clock::now();
 	for (size_t i = 0; i < NUM_QUERIES; ++i) {
 		offsets_zp7[i] = static_cast<uint8_t>(blk.resolve_offset_zp7(ctx, queries[i], FP_index));
 		sum_zp7 += offsets_zp7[i];
 	}
-	auto end_zp7 = std::chrono::high_resolution_clock::now();
-	auto ms_zp7 = std::chrono::duration_cast<std::chrono::milliseconds>(end_zp7 - start_zp7).count();
-
-	auto start_simd = std::chrono::high_resolution_clock::now();
 	for (size_t i = 0; i < NUM_QUERIES; ++i) {
 		offsets_simd[i] = static_cast<uint8_t>(blk.resolve_offset(ctx, queries[i], FP_index));
 		sum_simd += offsets_simd[i];
 	}
-	auto end_simd = std::chrono::high_resolution_clock::now();
-	auto ms_simd = std::chrono::duration_cast<std::chrono::milliseconds>(end_simd - start_simd).count();
-
-	auto start_prepare_simd = std::chrono::high_resolution_clock::now();
 	for (size_t i = 0; i < NUM_QUERIES; ++i) {
 		auto slot_index = queries[i].range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
 		auto ctx_local = blk.prepare_slot(slot_index, FP_index);
 		offsets_prepare_simd[i] = static_cast<uint8_t>(blk.resolve_offset(ctx_local, queries[i], FP_index));
 		sum_prepare_simd += offsets_prepare_simd[i];
 	}
-	auto end_prepare_simd = std::chrono::high_resolution_clock::now();
-	auto ms_prepare_simd = std::chrono::duration_cast<std::chrono::milliseconds>(end_prepare_simd - start_prepare_simd).count();
-
-	auto start_prepared = std::chrono::high_resolution_clock::now();
-	for (size_t i = 0; i < NUM_QUERIES; ++i) {
-		results_prepared[i] = sg.read(queries[i], *ssdLog.get());
-	}
-	auto end_prepared = std::chrono::high_resolution_clock::now();
-	auto ms_prepared = std::chrono::duration_cast<std::chrono::milliseconds>(end_prepared - start_prepared).count();
-
-	auto start_batch = std::chrono::high_resolution_clock::now();
-	sg.read_batch(queries.data(), results_batch.data(), NUM_QUERIES, *ssdLog.get());
-	auto end_batch = std::chrono::high_resolution_clock::now();
-	auto ms_batch = std::chrono::duration_cast<std::chrono::milliseconds>(end_batch - start_batch).count();
-
-	auto start_batch_pext = std::chrono::high_resolution_clock::now();
-	sg.read_batch_simd(queries.data(), results_batch_pext.data(), NUM_QUERIES, *ssdLog.get());
-	auto end_batch_pext = std::chrono::high_resolution_clock::now();
-	auto ms_batch_pext = std::chrono::duration_cast<std::chrono::milliseconds>(end_batch_pext - start_batch_pext).count();
 
 	for (size_t i = 0; i < NUM_QUERIES; ++i) {
 		if (offsets_get_index[i] != offsets_zp7[i] || offsets_zp7[i] != offsets_simd[i] || offsets_simd[i] != offsets_prepare_simd[i]) {
@@ -160,23 +129,76 @@ int main() {
 			return 1;
 		}
 	}
+	std::cout << "Correctness: ALL PASS" << std::endl;
+	std::cout << "Checksum (get_index/zp7/simd/prepare+simd): " << sum_get_index << " / " << sum_zp7 << " / " << sum_simd << " / " << sum_prepare_simd << std::endl;
 
-	std::cout << "--- resolve_offset SIMD vs zp7 ---" << std::endl;
+	// --- Performance (averaged over NUM_RUNS runs) ---
+	constexpr size_t NUM_RUNS = 100;
+
+	auto run_bench_avg = [&](auto fn, size_t runs = NUM_RUNS) {
+		double total_ms = 0.0;
+		for (size_t run = 0; run < runs; ++run) {
+			auto start = std::chrono::high_resolution_clock::now();
+			fn();
+			auto end = std::chrono::high_resolution_clock::now();
+			total_ms += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+		}
+		return total_ms / static_cast<double>(runs);
+	};
+
+	double avg_get_index = run_bench_avg([&]() {
+		for (size_t i = 0; i < NUM_QUERIES; ++i) {
+			auto idx_pair = blk.get_index(queries[i], FP_index);
+			offsets_get_index[i] = static_cast<uint8_t>(idx_pair.second);
+		}
+	});
+
+	double avg_zp7 = run_bench_avg([&]() {
+		for (size_t i = 0; i < NUM_QUERIES; ++i) {
+			offsets_zp7[i] = static_cast<uint8_t>(blk.resolve_offset_zp7(ctx, queries[i], FP_index));
+		}
+	});
+
+	double avg_simd = run_bench_avg([&]() {
+		for (size_t i = 0; i < NUM_QUERIES; ++i) {
+			offsets_simd[i] = static_cast<uint8_t>(blk.resolve_offset(ctx, queries[i], FP_index));
+		}
+	});
+
+	double avg_prepare_simd = run_bench_avg([&]() {
+		for (size_t i = 0; i < NUM_QUERIES; ++i) {
+			auto slot_index = queries[i].range_fast_one_reg(0, FP_index - COUNT_SLOT_BITS, FP_index);
+			auto ctx_local = blk.prepare_slot(slot_index, FP_index);
+			offsets_prepare_simd[i] = static_cast<uint8_t>(blk.resolve_offset(ctx_local, queries[i], FP_index));
+		}
+	});
+
+	double avg_prepared = run_bench_avg([&]() {
+		for (size_t i = 0; i < NUM_QUERIES; ++i) {
+			results_prepared[i] = sg.read(queries[i], *ssdLog.get());
+		}
+	});
+
+	double avg_batch = run_bench_avg([&]() {
+		sg.read_batch(queries.data(), results_batch.data(), NUM_QUERIES, *ssdLog.get());
+	});
+
+	double avg_batch_pext = run_bench_avg([&]() {
+		sg.read_batch_simd(queries.data(), results_batch_pext.data(), NUM_QUERIES, *ssdLog.get());
+	});
+
+	std::cout << "--- resolve_offset SIMD vs zp7 (Averaged over " << NUM_RUNS << " runs) ---" << std::endl;
 	std::cout << "Architecture SIMD capability active: " << SIMD_ARCH_NAME << std::endl;
 	std::cout << "Queries: " << NUM_QUERIES << std::endl;
-	std::cout << "get_index time: " << ms_get_index << " ms" << std::endl;
-	std::cout << "zp7 resolve_offset time: " << ms_zp7 << " ms" << std::endl;
-	std::cout << "SIMD resolve_offset time: " << ms_simd << " ms" << std::endl;
-	std::cout << "prepare+SIMD resolve_offset time: " << ms_prepare_simd << " ms" << std::endl;
-	std::cout << "read_prepared time: " << ms_prepared << " ms" << std::endl;
-	std::cout << "read_batch time: " << ms_batch << " ms" << std::endl;
-	std::cout << "read_batch_simd time: " << ms_batch_pext << " ms" << std::endl;
-	std::cout << "Speedup (read_batch / read_batch_simd): " << static_cast<double>(ms_batch) / static_cast<double>(ms_batch_pext) << "x" << std::endl;
-	std::cout << "Speedup (read_prepared / read_batch_simd): " << static_cast<double>(ms_prepared) / static_cast<double>(ms_batch_pext) << "x" << std::endl;
-	std::cout << "Speedup (get_index / simd): " << static_cast<double>(ms_get_index) / static_cast<double>(ms_simd) << "x" << std::endl;
-	std::cout << "Speedup (get_index / prepare+simd): " << static_cast<double>(ms_get_index) / static_cast<double>(ms_prepare_simd) << "x" << std::endl;
-	std::cout << "Speedup (zp7 / simd): " << static_cast<double>(ms_zp7) / static_cast<double>(ms_simd) << "x" << std::endl;
-	std::cout << "Checksum (get_index/zp7/simd/prepare+simd): " << sum_get_index << " / " << sum_zp7 << " / " << sum_simd << " / " << sum_prepare_simd << std::endl;
+	std::cout << "get_index time: " << avg_get_index << " ms" << std::endl;
+	std::cout << "zp7 resolve_offset time: " << avg_zp7 << " ms" << std::endl;
+	std::cout << "SIMD resolve_offset time: " << avg_simd << " ms" << std::endl;
+	std::cout << "prepare+SIMD resolve_offset time: " << avg_prepare_simd << " ms" << std::endl;
+	std::cout << "Scalar read() time: " << avg_prepared << " ms" << std::endl;
+	std::cout << "read_batch time: " << avg_batch << " ms" << std::endl;
+	std::cout << "read_batch_simd time: " << avg_batch_pext << " ms" << std::endl;
+	std::cout << "Speedup (Scalar read / read_batch_simd): " << avg_prepared / avg_batch_pext << "x" << std::endl;
+	std::cout << "Speedup (get_index / prepare+SIMD): " << avg_get_index / avg_prepare_simd << "x" << std::endl;
     
     // Cleanup
     ssdLog.reset(); // Close file handle before removal

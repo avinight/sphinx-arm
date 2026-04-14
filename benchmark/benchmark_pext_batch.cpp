@@ -80,7 +80,7 @@ int main() {
     
     std::vector<std::optional<TestDefaultTraits::ENTRY_TYPE>> results(NUM_QUERIES);
     
-    auto run_bench_avg = [&](auto fn, size_t runs = 5) {
+    auto run_bench_avg = [&](auto fn, size_t runs = 100) {
         double total_ms = 0.0;
         for (size_t run = 0; run < runs; ++run) {
             auto start = std::chrono::high_resolution_clock::now();
@@ -105,7 +105,7 @@ int main() {
     });
 
     // Verification
-    for(size_t i=0; i<NUM_QUERIES; ++i) {
+    for (size_t i = 0; i < NUM_QUERIES; ++i) {
         if (!results[i].has_value() || !results_batch[i].has_value() ||
             results[i].value().value != results_batch[i].value().value) {
             std::cerr << "Mismatch at " << i << ". Scalar read: " << (results[i].has_value() ? results[i].value().value : -1) 
@@ -114,7 +114,7 @@ int main() {
         }
     }
     
-    std::cout << "--- Unified Batch Performance (Averaged over 5 runs) ---" << std::endl;
+    std::cout << "--- Unified Batch Performance (Averaged over 100 runs) ---" << std::endl;
     std::cout << "Architecture SIMD capability active: " << SIMD_ARCH_NAME << std::endl;
     std::cout << "Queries: " << NUM_QUERIES << std::endl;
     std::cout << "Regular read() (Scalar):  " << avg_ms_scalar << " ms" << std::endl;

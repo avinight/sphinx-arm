@@ -306,7 +306,6 @@ class Segment {
 
         std::vector<QuerySortItem> items(count);
 
-        // Pass 0: Initial Extraction with Prefetching
         constexpr size_t PREFETCH_AHEAD = 4;
         bool already_sorted = true;
         for (size_t i = 0; i < count; i++) {
@@ -326,7 +325,6 @@ class Segment {
             }
         }
 
-        // Pass 1: Sort ONLY if necessary
         if (!already_sorted) {
             std::sort(items.begin(), items.end(), [](const QuerySortItem& a, const QuerySortItem& b) {
                 if (a.blkIdx != b.blkIdx) return a.blkIdx < b.blkIdx;
@@ -334,12 +332,11 @@ class Segment {
             });
         }
 
-        // Auxiliary buffers for SIMD operations
         std::vector<uint64_t> data_words;
         std::vector<uint64_t> pext_out;
         data_words.reserve(std::min(count, static_cast<size_t>(1024)));
 
-        // Pass 2: Process groups via SIMD
+        // Process groups via SIMD
         size_t i = 0;
         while (i < count) {
             uint32_t current_blkIdx = items[i].blkIdx;
