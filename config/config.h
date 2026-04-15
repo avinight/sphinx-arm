@@ -9,10 +9,10 @@
 // #define IN_MEMORY_FILE
 
 // XDP ENABLE
-// #define ENABLE_XDP
+#define ENABLE_XDP
 
 // only for MT
-// #define ENABLE_MT
+#define ENABLE_MT
 
 // DISABLE for read_latency benchmark and in memory benchmark
 //#define ENABLE_BP_PUT_IN_READ

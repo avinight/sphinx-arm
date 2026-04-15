@@ -135,7 +135,7 @@ int main() {
 	// --- Performance (averaged over NUM_RUNS runs) ---
 	constexpr size_t NUM_RUNS = 1000;
 
-	auto run_bench_avg = [&](auto fn, size_t runs = NUM_RUNS) {
+	auto run_bench_avg = [&](auto fn, size_t runs) {
 		double total_ms = 0.0;
 		for (size_t run = 0; run < runs; ++run) {
 			auto start = std::chrono::high_resolution_clock::now();
@@ -151,19 +151,19 @@ int main() {
 			auto idx_pair = blk.get_index(queries[i], FP_index);
 			offsets_get_index[i] = static_cast<uint8_t>(idx_pair.second);
 		}
-	});
+	}, NUM_RUNS);
 
 	double avg_zp7 = run_bench_avg([&]() {
 		for (size_t i = 0; i < NUM_QUERIES; ++i) {
 			offsets_zp7[i] = static_cast<uint8_t>(blk.resolve_offset_zp7(ctx, queries[i], FP_index));
 		}
-	});
+	}, NUM_RUNS);
 
 	double avg_simd = run_bench_avg([&]() {
 		for (size_t i = 0; i < NUM_QUERIES; ++i) {
 			offsets_simd[i] = static_cast<uint8_t>(blk.resolve_offset(ctx, queries[i], FP_index));
 		}
-	});
+	}, NUM_RUNS);
 
 	double avg_prepare_simd = run_bench_avg([&]() {
 		for (size_t i = 0; i < NUM_QUERIES; ++i) {
@@ -171,21 +171,21 @@ int main() {
 			auto ctx_local = blk.prepare_slot(slot_index, FP_index);
 			offsets_prepare_simd[i] = static_cast<uint8_t>(blk.resolve_offset(ctx_local, queries[i], FP_index));
 		}
-	});
+	}, NUM_RUNS);
 
 	double avg_prepared = run_bench_avg([&]() {
 		for (size_t i = 0; i < NUM_QUERIES; ++i) {
 			results_prepared[i] = sg.read(queries[i], *ssdLog.get());
 		}
-	});
+	}, NUM_RUNS);
 
 	double avg_batch = run_bench_avg([&]() {
 		sg.read_batch(queries.data(), results_batch.data(), NUM_QUERIES, *ssdLog.get());
-	});
+	}, NUM_RUNS);
 
 	double avg_batch_pext = run_bench_avg([&]() {
 		sg.read_batch_simd(queries.data(), results_batch_pext.data(), NUM_QUERIES, *ssdLog.get());
-	});
+	}, NUM_RUNS);
 
 	std::cout << "--- resolve_offset SIMD vs zp7 (Averaged over " << NUM_RUNS << " runs) ---" << std::endl;
 	std::cout << "Architecture SIMD capability active: " << SIMD_ARCH_NAME << std::endl;
