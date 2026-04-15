@@ -80,7 +80,7 @@ int main() {
     
     std::vector<std::optional<TestDefaultTraits::ENTRY_TYPE>> results(NUM_QUERIES);
     
-    auto run_bench_avg = [&](auto fn, size_t runs = 100) {
+    auto run_bench_avg = [&](auto fn, size_t runs = 1000) {
         double total_ms = 0.0;
         for (size_t run = 0; run < runs; ++run) {
             auto start = std::chrono::high_resolution_clock::now();
@@ -114,7 +114,7 @@ int main() {
         }
     }
     
-    std::cout << "--- Unified Batch Performance (Averaged over 100 runs) ---" << std::endl;
+    std::cout << "--- Unified Batch Performance (Averaged over 1000 runs) ---" << std::endl;
     std::cout << "Architecture SIMD capability active: " << SIMD_ARCH_NAME << std::endl;
     std::cout << "Queries: " << NUM_QUERIES << std::endl;
     std::cout << "Regular read() (Scalar):  " << avg_ms_scalar << " ms" << std::endl;

@@ -16,16 +16,16 @@
 #include "recorder/recorder.h"
 
 // parameters SSD & Optane
-constexpr size_t RSQF_STATIC_FP_SIZE = 15;
+constexpr size_t RSQF_STATIC_FP_SIZE = 10;
 constexpr auto SAMPLE_LOG = 0.01;
 constexpr auto MAX_INFINI_EXP = 5;
-size_t BATCH_SIZE_DEF = 4000;
-size_t BATCH_SIZE_REP = 500;
+size_t BATCH_SIZE_DEF = 1000;
+size_t BATCH_SIZE_REP = 100;
 
 // consts
 const std::string HOME = std::getenv("HOME");
 constexpr size_t INIT_SIZE_LOG = 12;
-constexpr size_t APPEND_ONLY_LOG_SIZE = 2000000;
+constexpr size_t APPEND_ONLY_LOG_SIZE = 200000;
 constexpr size_t INIT_SIZE = 1ull << INIT_SIZE_LOG;
 constexpr size_t NUM_KEYS_TOTAL = static_cast<size_t>(0.94 * INIT_SIZE * (1 << RSQF_STATIC_FP_SIZE));
 constexpr auto SIZE_KEY_INFINI_LOG = MAX_INFINI_EXP + INIT_SIZE_LOG;
@@ -436,7 +436,7 @@ void performTestFilterInfini(const std::string& ssdLogPath, const std::string& f
 int main() {
     // Define a vector of configurations (folder for output and SSD log file path)
     std::vector<std::pair<std::string, std::string>> configs = {
-        {HOME + "/research/sphinx/benchmark/data-extra-bits", HOME + "/research/sphinx/benchmark/logs/directory_test_3.txt"},
+        {"./benchmark/data-extra-bits", "./benchmark/logs/directory_test_3.txt"},
     };
 
     // Iterate over each configuration folder

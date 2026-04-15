@@ -43,7 +43,7 @@ void performInsertions(
 template <typename TemplateClass>
 void performTest(double inBufferRatio, std::ofstream &csvFile, const std::string &testName, float buffer_size_ratio) {
     constexpr size_t numKeys = BASE_EXP_INSERT_SIZE;
-    constexpr size_t exp_size = 1 << 18;
+    constexpr size_t exp_size = 1 << 16;
     std::vector<TestCPU::KEY_TYPE> keys(numKeys);
     std::iota(keys.begin(), keys.end(), 1);
 
@@ -51,8 +51,8 @@ void performTest(double inBufferRatio, std::ofstream &csvFile, const std::string
     std::mt19937 gen(seed);
 
     Directory<TemplateClass> dir(0, 1);
-    // auto ssdLog = std::make_unique<SSDLog<TemplateClass>>("/data/fleck/directory_cpu_test.txt", 1000000);
-    auto ssdLog = std::make_unique<SSDLog<TemplateClass>>("/data/fleck/directory_real.txt", 1000000);
+    // auto ssdLog = std::make_unique<SSDLog<TemplateClass>>("./benchmark/directory_cpu_test.txt", 1000000);
+    auto ssdLog = std::make_unique<SSDLog<TemplateClass>>("./benchmark/directory_real.txt", 1000000);
 
     performInsertions(dir, *ssdLog, keys, numKeys);
     auto bufferKeys = ssdLog->BP->getAllKeys();
@@ -100,7 +100,7 @@ void performTest(double inBufferRatio, std::ofstream &csvFile, const std::string
     std::cout << "Number of keys in bufferKeys: " 
               << static_cast<double>(keysInBufferCount) / exp_keys.size() << std::endl;
 
-    const auto rep_size = 10;
+    const auto rep_size = 3;
     std::array<int, rep_size> latencies;
 
     for (int i = 0; i < rep_size; ++i) {
@@ -151,7 +151,7 @@ int main() {
 #endif
 
     // Ensure the data-skew directory exists
-    std::string dirPath = HOME + "/research/sphinx/benchmark/data-skew";
+    std::string dirPath = "./benchmark/data-skew";
     if (!fs::exists(dirPath)) {
         fs::create_directory(dirPath);
     }

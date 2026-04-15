@@ -20,9 +20,22 @@ sns.set_theme(
 
 min_entries = 20000
 home_dir = os.environ.get("HOME")
+script_dir = os.path.dirname(os.path.abspath(__file__))
 font_ampl = 1.5 * amp2
 def_offset = 0.3
 def_rate =  1
+
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return os.path.abspath(path)
+    return os.path.abspath(candidates[0])
 
 alphbets = [
     "A-memory",
@@ -155,6 +168,7 @@ def plot_metric(
     if default_font_size < 0:
         default_font_size = 18.5
     all_y_vals = []  # To collect all y-values from all datasets
+    has_positive_values = False
     for label, data in datasets.items():
         offset = def_offset
         rate = def_rate
@@ -193,6 +207,7 @@ def plot_metric(
 
         # Collect y-values for auto-scaling
         all_y_vals.extend(y_vals.tolist())
+        has_positive_values = has_positive_values or np.any(np.asarray(y_vals) > 0)
 
         # plot every other point for better visibility
         marker_indices = np.arange(0, len(x_vals), 2)
@@ -218,9 +233,12 @@ def plot_metric(
     if y_limit:
         ax.set_ylim(0, y_limit)
     elif metric != "FPR":
-        y_max = max(all_y_vals)
-        ax.set_ylim(0, y_max * 1.04)  # 10% padding
-    if metric == "FPR":
+        if all_y_vals:
+            y_max = max(all_y_vals)
+            ax.set_ylim(0, y_max * 1.04)  # 10% padding
+        else:
+            ax.set_ylim(0, 1) # Fallback for no data
+    if metric == "FPR" and has_positive_values:
         ax.set_yscale("symlog", linthresh=1e-6)
     if metric == "insertion_time" and mode == "ssd":
         ax.set_xlim(min_entries // 1.3, 10**8)
@@ -245,14 +263,29 @@ def plot_metric(
 # Generate Memory Figure (5 columns)
 fig_mem, axes_mem = plt.subplots(1, 6, figsize=(39, 7))
 mode = "memory"
-base_path = os.path.join(
-    home_dir, "research", proj_name, "benchmark", "data-memory"
-)
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+base_path = resolve_data_dir("data-memory")
 datasets = {
     label: pd.read_csv(os.path.join(base_path, file))
     for label, file in data_files.items()
     if os.path.exists(os.path.join(base_path, file))
 }
+if not datasets:
+    print(
+        f"[main_exp_mem] No datasets found in '{base_path}'. Skipping plot generation."
+    )
+    raise SystemExit(0)
 metrics = ["query_time", "tail-99-q", "update_time", "tail-99-u", "insertion_time", "tail-99-i"]
 for col in range(6):
     plot_metric(
@@ -283,5 +316,5 @@ fig_mem.legend(
 )
 fig_mem.tight_layout(rect=[0, 0, 1, 0.93])
 fig_mem.subplots_adjust(hspace=0.2, bottom=0.18, wspace=0.29, left=0.0315, right=0.999)
-fig_mem.savefig("benchmark_plots_main_memory.svg")
+fig_mem.savefig(os.path.join(script_dir, "benchmark_plots_main_memory.svg"))
 plt.close(fig_mem)

@@ -24,6 +24,18 @@ font_ampl = 1.5 * amp2
 def_offset = 0.3
 def_rate = 1
 
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return os.path.abspath(path)
+    return os.path.abspath(candidates[0])
+
 alphbets = [
     "memory", "Optane", "SSD"
 ]
@@ -146,8 +158,11 @@ def plot_metric(
     if y_limit:
         ax.set_ylim(0, y_limit)
     elif metric != "FPR":
-        y_max = max(all_y_vals)
-        ax.set_ylim(0, y_max * 1.04)  # 10% padding
+        if all_y_vals:
+            y_max = max(all_y_vals)
+            ax.set_ylim(0, y_max * 1.04)  # 10% padding
+        else:
+            ax.set_ylim(0, 1)
     if metric == "FPR":
         ax.set_yscale("symlog", linthresh=1e-6)
     if metric == "insertion_time" and mode == "ssd":
@@ -162,7 +177,7 @@ def plot_metric(
         )
     ax.tick_params(axis="both", which="major", labelsize=19 * font_ampl)
 
-base_path = os.path.join(home_dir, "research", proj_name, "benchmark", "data-memory-zipf")
+base_path = resolve_data_dir("data-memory-zipf")
 datasets = {
     label: pd.read_csv(os.path.join(base_path, file))
     for label, file in data_files.items()
@@ -173,7 +188,7 @@ fig_ossd, axes_ossd = plt.subplots(1, 3, figsize=(30, 6.5))
 modes = ["memory", "optane", "ssd"]
 idx = 0
 for row, mode in enumerate(modes):
-    base_path = os.path.join(home_dir, "research", proj_name, "benchmark", f"data-{mode}-zipf")
+    base_path = resolve_data_dir(f"data-{mode}-zipf")
     datasets = {
         label: pd.read_csv(os.path.join(base_path, file))
         for label, file in data_files.items()
@@ -205,5 +220,5 @@ fig_ossd.legend(
 # Adjust the layout to make room for the legend
 fig_ossd.tight_layout(rect=[0, 0, 1, 0.93])
 
-fig_ossd.savefig("benchmark_plots_main_zipf.svg")
+fig_ossd.savefig(os.path.join(script_dir, "benchmark_plots_main_zipf.svg"))
 plt.close(fig_ossd)

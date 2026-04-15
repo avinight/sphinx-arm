@@ -23,7 +23,21 @@ from_ = 3000
 
 # folder containing the csv files
 home_dir = os.environ.get("HOME")
-folder = os.path.join(home_dir, f"research/{proj_name}/benchmark/data-extra-bits")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return os.path.abspath(path)
+    return os.path.abspath(candidates[0])
+
+folder = resolve_data_dir("data-extra-bits")
 
 # define the csv files (adjust the names if needed)
 files = {
@@ -280,4 +294,4 @@ for ax in axes:
 
 # Set margins similar to benchmark plots
 plt.tight_layout(rect=[0, 0, 1, 0.87])
-plt.savefig("extra_bits.svg")
+plt.savefig(os.path.join(script_dir, "extra_bits.svg"))

@@ -25,13 +25,34 @@ sns.set_theme(
 )
 
 font_amp = 1.3
+script_dir = os.path.dirname(os.path.abspath(__file__))
 # ── 1) Load data ───────────────────────────────────────────────────────────
-home_dir = os.environ["HOME"]
-base = os.path.join(home_dir, "research", proj_name, "benchmark", "data-memory")
-df_xdp = pd.read_csv(os.path.join(base, "benchmark_XDP.csv"), index_col="num_entries")
-df_sphinx = pd.read_csv(
-    os.path.join(base, "benchmark_Sphinx.csv"), index_col="num_entries"
-)
+home_dir = os.environ.get("HOME")
+
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+base = resolve_data_dir("data-memory")
+xdp_path = os.path.join(base, "benchmark_XDP.csv")
+sphinx_path = os.path.join(base, "benchmark_Sphinx.csv")
+if not (os.path.exists(xdp_path) and os.path.exists(sphinx_path)):
+    print(
+        "[main_exp_mem_ptr] Missing required CSVs. "
+        f"Expected '{xdp_path}' and '{sphinx_path}'. Skipping plot."
+    )
+    raise SystemExit(0)
+
+df_xdp = pd.read_csv(xdp_path, index_col="num_entries")
+df_sphinx = pd.read_csv(sphinx_path, index_col="num_entries")
 
 # ── 2) Compute closest indices ──────────────────────────────────────────────
 targets = [10**6, 10**7, 10**8]
@@ -39,11 +60,24 @@ entries = df_xdp.index.to_numpy()
 closest_exact1 = [1.05587e+06, 8.44696e+06, 6.75756e+07]
 closest_exact2 = [992014, 7.93611e+06, 6.34889e+07]
 
-# ── 3) Rolling-min(25) ──────────────────────────────────────────────────────
+# ––– 3) Rolling-min(25) ──────────────────────────────────────────────────────
 df_xdp_rm = df_xdp.rolling(1, min_periods=1).min()
 df_sphinx_rm = df_sphinx.rolling(1, min_periods=1).min()
-xdp_sel = df_xdp_rm.loc[closest_exact1]
-sphinx_sel = df_sphinx_rm.loc[closest_exact2].copy()
+
+def get_closest_indices(df, target_values):
+    indices = df.index.to_numpy()
+    closest = []
+    for target in target_values:
+        idx = (np.abs(indices - target)).argmin()
+        closest.append(indices[idx])
+    return closest
+
+# Find closest indices for both dataframes
+actual_indices_xdp = get_closest_indices(df_xdp_rm, targets)
+actual_indices_sphinx = get_closest_indices(df_sphinx_rm, targets)
+
+xdp_sel = df_xdp_rm.loc[actual_indices_xdp]
+sphinx_sel = df_sphinx_rm.loc[actual_indices_sphinx].copy()
 
 # ── 4) Compute Sphinx overhead ───────────────────────────────────────────────
 sphinx_sel["overhead"] = sphinx_sel["memory_including_ptr"] - sphinx_sel["memory"]
@@ -191,6 +225,6 @@ ax.margins(x=0.01)
 plt.tight_layout(pad=0.1)
 plt.subplots_adjust(top=0.87, bottom=0.30, left=0.082, right=1)
 
-plt.savefig("memory_comparison.svg", dpi=300)
+plt.savefig(os.path.join(script_dir, "memory_comparison.svg"), dpi=300)
 plt.close(fig)
 

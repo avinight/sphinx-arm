@@ -14,9 +14,9 @@
 #include "recorder/recorder.h"
 
 // ––– Constants –––
-constexpr size_t NUM_INSERT_KEYS = 0.93 * (1ull << 23);  // ~8M keys to insert
-constexpr size_t NUM_QUERY_KEYS = 4000000;               // 4M query keys
-constexpr int NUM_ROUNDS = 21;                           // 21 rounds of queries
+constexpr size_t NUM_INSERT_KEYS = 1ull << 19;  // ~500K keys to insert
+constexpr size_t NUM_QUERY_KEYS = 200000;               // 200K query keys
+constexpr int NUM_ROUNDS = 5;                           // 5 rounds of queries
 const std::string HOME = std::getenv("HOME");
 constexpr size_t INIT_SIZE_LOG = 12;
 constexpr size_t INIT_SIZE = 1ull << INIT_SIZE_LOG;
@@ -139,11 +139,11 @@ std::vector<double> runQueryTest(const std::vector<size_t>& queryKeys,
 }
 
 int main() {
-    std::string dataFolder = HOME + "/research/sphinx/benchmark/data-tail";
+    std::string dataFolder = "./benchmark/data-tail";
     std::filesystem::create_directories(dataFolder);
 
     std::vector<std::string> ssdLogPaths = {
-        HOME + "/research/sphinx/benchmark/directory_test.txt", // SSD path
+        "./benchmark/directory_test.txt", // SSD path
         // "/optane/log/directory_tests.txt"   // Optane path
     };
 

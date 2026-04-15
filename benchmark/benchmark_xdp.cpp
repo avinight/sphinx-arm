@@ -7,7 +7,7 @@
 #include "../xdp/xdp.h"
 #include "recorder/recorder.h"
 
-constexpr size_t RSQF_STATIC_FP_SIZE = 15;
+constexpr size_t RSQF_STATIC_FP_SIZE = 10;
 constexpr auto SAMPLE_LOG = 0.03;
 
 // consts
@@ -72,7 +72,7 @@ void runXDPMemTest(const std::string &folder) {
 
 int main() {
 #ifdef ENABLE_XDP
-    auto dataFolder = HOME + "/research/sphinx/benchmark/data-memory";
+    auto dataFolder = "./benchmark/data-memory";
     std::filesystem::create_directories(dataFolder);
     std::cout << " Test XDP\n";
     runXDPMemTest(dataFolder);

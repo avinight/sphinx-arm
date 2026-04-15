@@ -21,7 +21,7 @@ std::string HOME = std::getenv("HOME");
 
 // For demonstration, define a constant for how many keys we insert/read.
 // (Adjust to match your actual test size)
-static constexpr size_t NUM_KEYS = 1 << 22; // 4 million keys, e.g.
+static constexpr size_t NUM_KEYS = 1 << 19; // 512K keys
 
 // ***********************************************************
 // Benchmark functions (unchanged)
@@ -119,15 +119,15 @@ int main()
         // "optane",
         "ssd",
     };
-    std::filesystem::create_directories(HOME + "/research/sphinx/benchmark/data-mt");
+    std::filesystem::create_directories("./benchmark/data-mt");
     // Open CSV file for throughput results
     for (const std::string &mode : modes) {
-        std::ofstream csvFile(HOME + "/research/sphinx/benchmark/data-mt/throughput_vs_threads_4ReserveBits" + mode + ".csv");
+        std::ofstream csvFile("./benchmark/data-mt/throughput_vs_threads_4ReserveBits" + mode + ".csv");
         std::string ssdFilePath;
         if (mode == "optane") {
-            ssdFilePath = "/optane/log/directory_test2.txt";
+            ssdFilePath = "./benchmark/directory_test_optane.txt";
         } else if (mode == "ssd") {
-            ssdFilePath = "/data/fleck/directory_test2.txt";
+            ssdFilePath = "./benchmark/directory_test2.txt";
         }
         // Updated header to include RandomRead throughput
         csvFile << "ThreadCount,InsertThroughput_ops_s,ReadThroughput_ops_s,RandomReadThroughput_ops_s\n";
@@ -139,7 +139,7 @@ int main()
         std::vector<size_t> threadCounts = {1, 2, 4, 8, 16, 32, 64};
 
         constexpr size_t segmentCountLog = 6;
-        constexpr int repetitions = 3;
+        constexpr int repetitions = 1;
 
         for (auto tCount : threadCounts) {
             // Vectors to store throughput results for the 6 repetitions
@@ -178,9 +178,9 @@ int main()
             std::sort(randomReadResults.begin(), randomReadResults.end());
 
             // Select the 3rd and 4th middle ones (indices 2 and 3) and average them
-            double avgInsert = insertResults[1];
-            double avgRead = readResults[1];
-            double avgRandomRead = randomReadResults[1];
+            double avgInsert = insertResults[0];
+            double avgRead = readResults[0];
+            double avgRandomRead = randomReadResults[0];
 
             // Print the averaged results to the console
             std::cout << "Threads = " << tCount << "\n"
@@ -197,12 +197,12 @@ int main()
         csvFile.close();
     }
     for (const std::string &mode : modes) {
-        std::ofstream csvFile(HOME + "/research/sphinx/benchmark/data-mt/throughput_vs_threads_" + mode + ".csv");
+        std::ofstream csvFile("./benchmark/data-mt/throughput_vs_threads_" + mode + ".csv");
         std::string ssdFilePath;
         if (mode == "optane") {
-            ssdFilePath = "/optane/log/directory_test2.txt";
+            ssdFilePath = "./benchmark/directory_test_optane.txt";
         } else if (mode == "ssd") {
-            ssdFilePath = "/data/fleck/directory_test2.txt";
+            ssdFilePath = "./benchmark/directory_test2.txt";
         }
         // Updated header to include RandomRead throughput
         csvFile << "ThreadCount,InsertThroughput_ops_s,ReadThroughput_ops_s,RandomReadThroughput_ops_s\n";
@@ -214,7 +214,7 @@ int main()
         std::vector<size_t> threadCounts = {1, 2, 4, 8, 16, 32, 64};
 
         constexpr size_t segmentCountLog = 6;
-        constexpr int repetitions = 3;
+        constexpr int repetitions = 1;
 
         for (auto tCount : threadCounts) {
             // Vectors to store throughput results for the 6 repetitions
@@ -253,9 +253,9 @@ int main()
             std::sort(randomReadResults.begin(), randomReadResults.end());
 
             // Select the 3rd and 4th middle ones (indices 2 and 3) and average them
-            double avgInsert = insertResults[1];
-            double avgRead = readResults[1];
-            double avgRandomRead = randomReadResults[1];
+            double avgInsert = insertResults[0];
+            double avgRead = readResults[0];
+            double avgRandomRead = randomReadResults[0];
 
             // Print the averaged results to the console
             std::cout << "Threads = " << tCount << "\n"

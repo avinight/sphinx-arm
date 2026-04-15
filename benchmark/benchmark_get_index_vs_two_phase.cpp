@@ -133,7 +133,7 @@ int main() {
 	std::cout << "Checksum (get_index/zp7/simd/prepare+simd): " << sum_get_index << " / " << sum_zp7 << " / " << sum_simd << " / " << sum_prepare_simd << std::endl;
 
 	// --- Performance (averaged over NUM_RUNS runs) ---
-	constexpr size_t NUM_RUNS = 100;
+	constexpr size_t NUM_RUNS = 1000;
 
 	auto run_bench_avg = [&](auto fn, size_t runs = NUM_RUNS) {
 		double total_ms = 0.0;

@@ -17,12 +17,25 @@ sns.set_theme(
     },
 )
 font_ampl = 1.4 * amp2
+script_dir = os.path.dirname(os.path.abspath(__file__))
 # -------------------------------
 # PARAMETERS (feel free to adjust)
 # -------------------------------
 moving_avg_window = 10  # Smoothing window size (for Savitzky–Golay smoothing)
 skip = 40                # Plot every nth point
-data_dir = "data-lf"     # Directory where the CSV files are stored
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+    return os.path.abspath(candidates[0])
+
+
+data_dir = resolve_data_dir("data-lf")     # Directory where the CSV files are stored
 
 # -------------------------------
 # FILES and DATASET LABELS
@@ -99,6 +112,9 @@ def load_datasets(data_dir, files):
     datasets = {}
     for label, filename in files.items():
         filepath = os.path.join(data_dir, filename)
+        if not os.path.exists(filepath):
+            print(f"[lf] Missing CSV: {filepath} (skipping {label})")
+            continue
         df = pd.read_csv(filepath)
         # Filter out rows where LF is too low
         df = df[df['LF'] >= 0.01]
@@ -195,6 +211,9 @@ def plot_metric(ax, datasets, metric, x_col, smoothing_window, skip, apply_smoot
 def main():
     # Load the datasets from CSV files
     datasets = load_datasets(data_dir, files)
+    if not datasets:
+        print(f"[lf] No datasets found in '{data_dir}'. Skipping plot generation.")
+        return
 
     # Create a 1x4 grid of subplots
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
@@ -221,7 +240,7 @@ def main():
         ax.spines["right"].set_visible(False)
     plt.tight_layout(rect=[0, 0, 1, 0.90])
     plt.subplots_adjust(bottom=0.20, top=0.85)
-    plt.savefig("lf_benchmark_plot.svg")
+    plt.savefig(os.path.join(script_dir, "lf_benchmark_plot.svg"))
 
 
 # -------------------------------

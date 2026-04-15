@@ -182,7 +182,7 @@ void Run(Directory<Traits>& dir,
         name = "Fleck";
     }
     metrics.printToFile( { "num_entries", "insertion_time", "query_time", "LF", "memory" },
-                         HOME + "/research/sphinx/benchmark/data-lf/benchmark_", name);
+                         "./benchmark/data-lf/benchmark_", name);
 }
 
 
@@ -269,7 +269,7 @@ void RunPHT(memento::Memento<true>& filter,
     }
     
     metrics.printToFile( { "num_entries", "insertion_time", "query_time", "LF", "memory" },
-                         HOME + "/research/sphinx/benchmark/data-lf/benchmark_", "Perfect_HT");
+                         "./benchmark/data-lf/benchmark_", "Perfect_HT");
 }
 
 
@@ -340,7 +340,7 @@ void RunFilter(memento::Memento<Traits::IS_INFINI>& filter,
         }
     }
     metrics.printToFile( { "num_entries", "insertion_time", "query_time", "memory", "LF" },
-                         HOME + "/research/sphinx/benchmark/data-lf/benchmark_", name);
+                         "./benchmark/data-lf/benchmark_", name);
 }
 
 //----------------------------------------------------------------------
@@ -388,7 +388,7 @@ void performTestPHT() {
 }
 
 int main() {
-    std::string dataFolder = HOME + "/research/sphinx/benchmark/data-lf";
+    std::string dataFolder = "./benchmark/data-lf";
     std::filesystem::create_directories(dataFolder);
     // ===============================================================
     std::cout << " Test Perfect HT\n";

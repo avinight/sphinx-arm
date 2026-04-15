@@ -14,13 +14,13 @@
 #include "recorder/recorder.h"
 #ifdef IN_MEMORY_FILE
 // parameters memory
-constexpr size_t RSQF_STATIC_FP_SIZE = 15;
+constexpr size_t RSQF_STATIC_FP_SIZE = 10;
 constexpr auto SAMPLE_LOG = 0.03;
 constexpr auto MAX_INFINI_EXP = 5;
 constexpr auto RANDOM_CNT = 400;
 #else
 // parameters SSD & Optane
-constexpr size_t RSQF_STATIC_FP_SIZE = 15;
+constexpr size_t RSQF_STATIC_FP_SIZE = 10;
 constexpr auto SAMPLE_LOG = 0.03;
 constexpr auto MAX_INFINI_EXP = 5;
 constexpr auto RANDOM_CNT = 400;
@@ -29,7 +29,7 @@ constexpr auto RANDOM_CNT = 400;
 // consts
 const std::string HOME = std::getenv("HOME");
 constexpr size_t INIT_SIZE_LOG = 12;
-constexpr size_t APPEND_ONLY_LOG_SIZE = 2000000;
+constexpr size_t APPEND_ONLY_LOG_SIZE = 200000;
 constexpr size_t HASH_TABLE_FP_SIZE = 7;
 constexpr size_t INIT_SIZE = 1ull << INIT_SIZE_LOG;
 constexpr size_t NUM_KEYS_TOTAL =
@@ -580,8 +580,7 @@ int main() {
         // {
             // HOME + "/research/sphinx/benchmark/data-optane-zipf",
             // "/optane/log/directory_test.txt"},
-        {HOME + "/research/sphinx/benchmark/data-ssd-zipf",
-         "/data/fleck/directory_test.txt"},
+        {"./benchmark/data-ssd-zipf", "./benchmark/directory_test.txt"},
     };
     // Iterate over each configuration
     for (const auto &[dataFolder, ssdLogPath] : configs) {
@@ -606,7 +605,7 @@ int main() {
     }
 #else
     auto dataFolder =
-        HOME + "/research/sphinx/benchmark/data-memory-zipf";
+        "./benchmark/data-memory-zipf";
     const auto ssdLogPath = "directory_cpu_test.txt";
     std::filesystem::create_directories(dataFolder);
     std::cout << " Test RSQF\n";

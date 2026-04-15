@@ -20,9 +20,22 @@ sns.set_theme(
 
 min_entries = 20000
 home_dir = os.environ.get("HOME")
+script_dir = os.path.dirname(os.path.abspath(__file__))
 font_ampl = 1.5 * amp2
 def_offset = 0.3
 def_rate = 1
+
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return os.path.abspath(path)
+    return os.path.abspath(candidates[0])
 
 alphbets = [
     "A-Optane",
@@ -206,8 +219,11 @@ def plot_metric(
     if y_limit:
         ax.set_ylim(0, y_limit)
     elif metric != "FPR":
-        y_max = max(all_y_vals)
-        ax.set_ylim(0, y_max * 1.04)  # 10% padding
+        if all_y_vals:
+            y_max = max(all_y_vals)
+            ax.set_ylim(0, y_max * 1.04)  # 10% padding
+        else:
+            ax.set_ylim(0, 1)
     if metric == "FPR":
         ax.set_yscale("symlog", linthresh=1e-6)
     if metric == "insertion_time" and mode == "ssd":
@@ -234,9 +250,7 @@ fig_ossd, axes_ossd = plt.subplots(2, 4, figsize=(30, 10))
 modes = ["optane", "ssd"]
 metrics = ["query_time", "tail-99-q", "update_time", "tail-99-u"]
 for row, mode in enumerate(modes):
-    base_path = os.path.join(
-        home_dir, "research", proj_name, "benchmark", f"data-{mode}"
-    )
+    base_path = resolve_data_dir(f"data-{mode}")
     datasets = {
         label: pd.read_csv(os.path.join(base_path, file))
         for label, file in data_files.items()
@@ -271,5 +285,5 @@ fig_ossd.legend(
 )
 fig_ossd.tight_layout(rect=[0, 0, 1, 0.95])
 fig_ossd.subplots_adjust(bottom=0.11, wspace=0.3)
-fig_ossd.savefig("benchmark_plots_main_optane_ssd.svg")
+fig_ossd.savefig(os.path.join(script_dir, "benchmark_plots_main_optane_ssd.svg"))
 plt.close(fig_ossd)

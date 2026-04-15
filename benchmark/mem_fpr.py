@@ -22,6 +22,7 @@ sns.set_theme(
 min_entries = 20000
 home_dir = os.environ.get("HOME")
 font_ampl = 1.5 * amp2
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
 alphbets = [
     "A-memory",
@@ -53,7 +54,20 @@ elif mode == "ssd":
 def_offset = 0.3
 def_rate = 1
 
-base_path = os.path.join(home_dir, "research", "sphinx", "benchmark", directory)
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+        os.path.join(home_dir or "", "research", proj_name, "benchmark", subdir),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return os.path.abspath(path)
+    return os.path.abspath(candidates[0])
+
+
+base_path = resolve_data_dir(directory)
 data_files = {
     "Sphinx": "benchmark_Sphinx.csv",
     "Sphinx-Loop": "benchmark_Sphinx-Loop.csv",
@@ -180,6 +194,7 @@ def plot_metric(
     show_all_ticks=False,
     ylabel_fix=False,
 ):
+    has_positive_values = False
     for label, data in datasets.items():
         offset = def_offset
         rate = def_rate
@@ -207,6 +222,7 @@ def plot_metric(
             labelText = "Adaptive Aleph"
         else:
             labelText = label
+        has_positive_values = has_positive_values or np.any(np.asarray(y_vals) > 0)
         ax.plot(
             np.asarray(x_vals),
             np.asarray(y_vals),
@@ -225,7 +241,11 @@ def plot_metric(
     elif metric != "FPR":
         ax.set_ylim(0)
     if metric == "FPR":
-        ax.set_yscale("symlog", linthresh=1e-6)
+        if has_positive_values:
+            ax.set_yscale("symlog", linthresh=1e-6)
+        else:
+            ax.set_yscale("linear")
+            ax.set_ylim(0, 1e-5) # linear fallback
     ax.set_ylabel(ylabel, fontsize=font_ampl * 20, fontweight="bold")
     if ylabel_fix:
         ax.yaxis.set_label_coords(-0.13, 0.5)
@@ -239,6 +259,11 @@ def plot_metric(
 
 
 if __name__ == "__main__":
+    if not datasets:
+        print(
+            f"[mem_fpr] No datasets found in '{base_path}'. Skipping plot generation."
+        )
+        raise SystemExit(0)
     # First figure (1 row, 2 columns)
     font_ampl *= 1.1
     fig1, axes1 = plt.subplots(1, 2, figsize=(15, 6), sharey=False)
@@ -302,6 +327,6 @@ if __name__ == "__main__":
         wspace=0.33   # tighten between the two subplots
     )
     
-    plt.savefig("benchmark_plots_mem_fpr.svg")
+    plt.savefig(os.path.join(script_dir, "benchmark_plots_mem_fpr.svg"))
     
 

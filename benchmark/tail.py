@@ -17,8 +17,19 @@ sns.set_theme(
     },
 )
 font_ampl = 2.4 * amp2
-# Define base path (assumed to be the current directory based on file locations)
-base_path = './data-tail' 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+def resolve_data_dir(subdir):
+    candidates = [
+        os.path.join(script_dir, subdir),
+        os.path.join(os.getcwd(), "benchmark", subdir),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+base_path = resolve_data_dir("data-tail") 
 
 # Define filenames for SSD and Optane datasets
 data_files_ssd = {
@@ -60,6 +71,9 @@ fig, axes = plt.subplots(1, 2, figsize=(24, 8.8))
 
 # Plot data on each subplot
 for ax, (storage_type, datasets) in zip(axes, [("SSD", datasets_ssd), ("Optane", datasets_optane)]):
+    if not datasets:
+        print(f"Warning: No datasets found for {storage_type} in {base_path}")
+        continue
     for label, df in datasets.items():
         times = df["query_time"].values
         N = len(times)
@@ -114,5 +128,5 @@ axes[0].set_ylim(0, 280.000)
 
 plt.tight_layout()
 plt.subplots_adjust(wspace=0.3)
-plt.savefig("tail_latency_distribution.svg")
+plt.savefig(os.path.join(script_dir, "tail_latency_distribution.svg"))
 
