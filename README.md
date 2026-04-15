@@ -1,7 +1,9 @@
-# Sphinx: A Succinct Perfect Hash Index for x86 
+# Sphinx: A Succinct Perfect Hash Index for x86 & ARM64
 
 <p align="left">
-Sphinx is a state-of-the-art succinct perfect hash table engineered for high performance on modern x86 CPUs. Its innovative encoding leverages rank and select primitives alongside auxiliary metadata to enable near-instantaneous hash table slot decoding. Moreover, Sphinx is designed to be expandable and easily parallelizable.
+Sphinx is a state-of-the-art succinct perfect hash table engineered for high performance on modern CPUs. Its innovative encoding leverages rank and select primitives alongside auxiliary metadata to enable near-instantaneous hash table slot decoding.
+
+Sphinx is optimized for both **x86_64 (AVX2/BMI2)** and **ARM64 (NEON)**.
 </p>
 
 
@@ -11,9 +13,16 @@ VLDB 2025 paper: https://www.vldb.org/pvldb/vol18/p4424-maghrebi.pdf
 
 To get started, simply clone the repository and navigate into the project directory:
 
+The easiest way to build Sphinx and reproduce the paper's results is using our integrated automation script:
+
 ```bash
+# Clone and enter the repo
 git clone [repo-url]
 cd sphinx
+
+# Run the full pipeline (Stages 1-5)
+# Stage 5 generates the final visualizations
+./benchmark/reproduce.sh --stage 5
 ```
 
 ## Reproducablity
@@ -25,17 +34,14 @@ After cloning the repository along with its submodules, follow these steps to bu
 
 1. Create a build directory and navigate into it:
    ```bash
-   mkdir build && cd build
-   ```
-2. Build the project with optimizations with:
-   ```bash
-   cmake --build . --parallel 10
+   cmake -B build . 
+   cmake --build build --parallel $(sysctl -n hw.ncpu || nproc)
    ```
 
-To run tests, make sure that `ENABLE_MT` is defined in your configuration. Then, execute:
-```bash
-ctest .
-```
+2. To run tests, make sure that `ENABLE_MT` is defined in your configuration. Then, execute:
+   ```bash
+   ctest --test-dir build
+   ```
 
 ## License
 

@@ -6,20 +6,46 @@ This document details the requirements, build instructions, environment setup, a
 
 Ensure that your system has the following software dependencies installed. Use **these versions and above**:
 
-| Dependency     | Version Installed (or later) |
-|---------------|-----------------------------|
-| **Seaborn**    | 0.12.2                      |
-| **Matplotlib** | 3.8.0                       |
-| **Pandas**     | 2.1.4                       |
-| **Numpy**      | 1.26.4                      |
-| **GCC**        | 11.4.0                      |
-| **CMake**      | 3.22.1                      |
-| **Git**        | 2.34.1                      |
-| **Python**     | 3.11.7                      |
+| Dependency     | Version Installed (or later) | Note |
+|---------------|-----------------------------|---|
+| **Seaborn**    | 0.12.2                      | Python plotting |
+| **Matplotlib** | 3.8.0                       | Python plotting |
+| **Pandas**     | 2.1.4                       | Data processing |
+| **Numpy**      | 1.26.4                      | |
+| **GCC**        | 11.4.0 (or Apple Clang)     | |
+| **CMake**      | 3.22.1                      | |
+| **Git**        | 2.34.1                      | |
+| **Python**     | 3.11.7                      | |
 
-Additionally, verify that **Bit Manipulation Instructions (BMI)** are enabled on your system.
+> **Note:** For optimal performance, a machine with at least 16GB of RAM is recommended for standard benchmarks (64GB for full Linux scale-out). **ARM64 (Apple Silicon)** is fully supported via NEON SIMD optimizations.
 
-> **Note:** For optimal performance, a Linux machine with at least 64GB of RAM is recommended.
+---
+
+## 1. Automated Workflow (Recommended)
+
+The easiest way to reproduce the results is using the `reproduce.sh` script, which automates configuration, building, and execution across 5 stages.
+
+### Standard Execution
+```bash
+./benchmark/reproduce.sh --stage [1-5]
+```
+
+### Pipeline Stages
+| Stage | Description | Key Outputs |
+|-------|-------------|-------------|
+| **1** | SSD/Optane Baseline | `data-ssd/`, `data-tail/` |
+| **2** | In-Memory & XDP Analysis | `data-memory/`, `data-memory-zipf/` |
+| **3** | Advanced Workloads (Skew/MT) | `data-mt/`, `data-skew/` |
+| **4** | Structural Properties | `data-extra-bits/`, `data-lf/` |
+| **5** | Final Visualization | Generates all SVG figures in `benchmark/` |
+
+### Cleanup Tools
+Manage your workspace with the built-in cleanup flags:
+- `--clean-build`: Removes `build/` artifacts and CMake cache.
+- `--clean-data`: Removes collected CSVs and generated SVGs.
+- `--deep-clean`: Full purge, including 16GB+ binary backing files.
+
+---
 
 ## Building
 
@@ -27,7 +53,7 @@ For detailed build instructions, please refer to the [README.md](../README.md).
 
 ## Environment Setup
 
-Before running the benchmarks, configure your environment by setting the appropriate flags in `./config/config.h`:
+If you prefer to run benchmarks manually or on custom workloads, configure your environment by setting the appropriate flags in `./config/config.h`:
 
 - **Memory Benchmarks:** Define `IN_MEMORY_FILE`
 - **Total Memory Benchmarks:** Define `ENABLE_XDP`
@@ -41,7 +67,7 @@ Before running the benchmarks, configure your environment by setting the appropr
 1. **Execute Benchmarks:**
 
    Run the benchmark binaries (e.g., `./build/benchmark_*`) with the corresponding configuration. Upon execution, several data directories will be created:
-   
+
 | Directory       | Description                                                 | Figure Reference  |
 |---------------|-------------------------------------------------|----------------|
 | data-lf       | Load factor benchmark                         | Figure 14      |
